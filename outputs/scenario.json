@@ -1,0 +1,42 @@
+{
+  "bbox_ll": [
+    14.2,
+    14.8,
+    49.9,
+    50.2
+  ],
+  "bbox_m": [
+    1580736.7692644845,
+    1647528.463740449,
+    6428975.579877882,
+    6480984.632951007
+  ],
+  "n_sites": 50,
+  "n_links": 123,
+  "wet_fraction": 0.06504065040650407,
+  "idw": {
+    "nnear": 8,
+    "p": 2.0,
+    "max_distance_m": 30000.0
+  },
+  "wet_spec": {
+    "wet_mode": "random",
+    "wet_target": 0.1,
+    "wet_min_mmph": 0.2,
+    "flip_dry_to_wet": 0.02,
+    "flip_wet_to_dry": 0.1,
+    "strata_nx": 8,
+    "strata_ny": 8
+  },
+  "rain_field": {
+    "n_blobs": 6,
+    "blob_sigma_m": 6000.0,
+    "peak_mmph": 25.0,
+    "noise_mmph": 1.0,
+    "grid_step_m": 1000.0,
+    "grid_nx": null,
+    "grid_ny": null
+  },
+  "dry_as_zero": true,
+  "seed": 2
+}
