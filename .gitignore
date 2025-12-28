@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Config files (keep .dist templates)
+configs/*.ini
+
+# Logs
+*.log
+*.log.*
+
+# Output directories
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
