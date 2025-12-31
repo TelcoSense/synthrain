@@ -13,7 +13,16 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import warnings
 
+warnings.filterwarnings(
+    "ignore",
+    message=r".*pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
+
+from pycomlink.spatial.interpolator import IdwKdtreeInterpolator
+from synthrain.config_utils import load_ini_defaults
 from synthrain.generate_network import NetworkSpec, generate_network
 from synthrain.simulate_rain import (
     RainFieldSpec,
@@ -22,7 +31,7 @@ from synthrain.simulate_rain import (
     build_link_observations,
 )
 from synthrain.idw import IdwKdtree
-from synthrain.render import save_field_png, save_links_png
+from synthrain.render import save_field_image, save_links_image
 from synthrain.csv_export import (
     CsvSpec,
     CsvSpecMinimal,
@@ -52,8 +61,6 @@ def main():
 
     defaults = {}
     if pre_args.config:
-        from synthrain.config_utils import load_ini_defaults
-
         defaults = load_ini_defaults(pre_args.config)
 
     ap = argparse.ArgumentParser(parents=[pre])
@@ -78,13 +85,6 @@ def main():
     ap.add_argument("--max-length-km", dest="max_length_km", type=float, default=30.0)
 
     # Interp grid (TelcoRain-like)
-    ap.add_argument(
-        "--use-mercator",
-        dest="use_mercator",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Compute distances in Web Mercator meters (recommended)",
-    )
     ap.add_argument("--grid-step-m", dest="grid_step_m", type=float, default=1000.0)
     ap.add_argument("--grid-nx", dest="grid_nx", type=int, default=None)
     ap.add_argument("--grid-ny", dest="grid_ny", type=int, default=None)
@@ -100,7 +100,7 @@ def main():
         "--wet-mode",
         dest="wet_mode",
         choices=["threshold", "random", "stratified"],
-        default="threshold",
+        default="random",
     )
     ap.add_argument("--wet-target", dest="wet_target", type=float, default=0.3)
     ap.add_argument(
@@ -192,7 +192,7 @@ def main():
         GridSpec(
             bbox_lonlat=bbox_ll,
             grid_step_m=args.grid_step_m,
-            use_mercator=bool(args.use_mercator),
+            use_mercator=True,
             grid_nx=args.grid_nx,
             grid_ny=args.grid_ny,
         )
@@ -235,28 +235,58 @@ def main():
     )
 
     # 4) IDW interpolation
-    # Choose values:
-    # - If dry_as_zero: use R_obs as-is (dry are 0)
-    # - else: set dry to NaN so they are ignored by IDW (exclude_nan=True)
-    values = links_obs["R_obs"].to_numpy(float).copy()
-    if not args.dry_as_zero:
-        values[~links_obs["wet"].to_numpy(bool)] = np.nan
+    # either pycomlink or custom style (testing not done yet)
+    if args.interp_style == "pycomlink":
+        x_sites = links_obs["x_center"].to_numpy(float)
+        y_sites = links_obs["y_center"].to_numpy(float)
 
-    xy = links_obs[["x_center", "y_center"]].to_numpy(float)
+        z_t = links_obs["R_obs"].to_numpy(float).copy()
+        if not args.dry_as_zero:
+            z_t[~links_obs["wet"].to_numpy(bool)] = np.nan
 
-    max_dist = (
-        None
-        if (args.idw_dist_m is None or float(args.idw_dist_m) <= 0)
-        else float(args.idw_dist_m)
-    )
-    idw = IdwKdtree(
-        nnear=args.idw_near,
-        p=args.idw_power,
-        max_distance=max_dist,
-        exclude_nan=True,
-    ).fit(xy, values)
+        max_dist = (
+            None
+            if (args.idw_dist_m is None or args.idw_dist_m <= 0)
+            else float(args.idw_dist_m)
+        )
 
-    z_idw = idw.predict_grid(xg_m, yg_m)
+        interpolator = IdwKdtreeInterpolator(
+            nnear=args.idw_near,
+            p=args.idw_power,
+            exclude_nan=True,
+            max_distance=max_dist,
+        )
+
+        z_idw = interpolator(
+            x=x_sites,
+            y=y_sites,
+            z=z_t,
+            xgrid=xg_m,
+            ygrid=yg_m,
+        )
+
+        # TelcoRain post-threshold
+        z_idw[z_idw < float(args.min_rain)] = 0.0
+    else:
+        values = links_obs["R_obs"].to_numpy(float).copy()
+        if not args.dry_as_zero:
+            values[~links_obs["wet"].to_numpy(bool)] = np.nan
+
+        xy = links_obs[["x_center", "y_center"]].to_numpy(float)
+
+        max_dist = (
+            None
+            if (args.idw_dist_m is None or float(args.idw_dist_m) <= 0)
+            else float(args.idw_dist_m)
+        )
+        idw = IdwKdtree(
+            nnear=args.idw_near,
+            p=args.idw_power,
+            max_distance=max_dist,
+            exclude_nan=True,
+        ).fit(xy, values)
+
+        z_idw = idw.predict_grid(xg_m, yg_m)
 
     # 5) Render
     vmin = 0.0
@@ -265,8 +295,8 @@ def main():
         if np.isfinite(z_idw).any()
         else float(np.nanmax(z_true))
     )
-    save_field_png(
-        str(out_dir / "true_field.png"),
+    save_field_image(
+        str(out_dir / "true_field"),
         lon_g,
         lat_g,
         z_true,
@@ -276,15 +306,17 @@ def main():
         xlabel="lon",
         ylabel="lat",
         min_rain=args.min_rain,
+        suffix="png",
     )
-    save_links_png(
-        str(out_dir / "links.png"),
+    save_links_image(
+        str(out_dir / "links"),
         links_obs,
         bbox=bbox_ll,
         title="Link centers (wet/dry)",
+        suffix="png",
     )
-    save_field_png(
-        str(out_dir / "idw_field.png"),
+    save_field_image(
+        str(out_dir / "idw_field"),
         lon_g,
         lat_g,
         z_idw,
@@ -296,11 +328,27 @@ def main():
         xlabel="lon",
         ylabel="lat",
         min_rain=args.min_rain,
+        suffix="pdf",
+    )
+    save_field_image(
+        str(out_dir / "idw_field"),
+        lon_g,
+        lat_g,
+        z_idw,
+        title="IDW from links (mm/h)",
+        vmin=vmin,
+        vmax=vmax,
+        links=links_obs,
+        show_links=True,
+        xlabel="lon",
+        ylabel="lat",
+        min_rain=args.min_rain,
+        suffix="png",
     )
 
     diff = z_idw - z_true
-    save_field_png(
-        str(out_dir / "diff.png"),
+    save_field_image(
+        str(out_dir / "diff"),
         lon_g,
         lat_g,
         diff,
@@ -308,6 +356,7 @@ def main():
         xlabel="lon",
         ylabel="lat",
         min_rain=args.min_rain,
+        suffix="png",
     )
 
     # 6) Optional CSV export

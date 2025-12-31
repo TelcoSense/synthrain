@@ -36,7 +36,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     Supported sections/keys:
     [io] out, debug, seed
     [network] n_sites, mean_degree, bbox, city, min_length_km, max_length_km
-    [interp] use_mercator, grid_step_m, grid_nx, grid_ny, idw_power, idw_near, idw_dist_m, dry_as_zero
+    [interp] interp_style, grid_step_m, grid_nx, grid_ny, idw_power, idw_near, idw_dist_m, dry_as_zero
     [rain] n_blobs, blob_sigma_m, peak_mmph, noise_mmph, min_rain
     [wet] wet_mode, wet_target, wet_min_mmph, flip_dry_to_wet, flip_wet_to_dry, wet_strata_nx, wet_strata_ny
     [csv] export_csv, csv_steps, csv_step_min, csv_start
@@ -70,7 +70,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     _get("network", "site_sampling", str, "site_sampling")
     _get("network", "site_min_dist_m", float, "site_min_dist_m")
 
-    _get("interp", "use_mercator", _parse_bool, "use_mercator")
+    _get("interp", "interp_style", str, "interp_style")
     _get("interp", "grid_step_m", float, "grid_step_m")
     _get("interp", "grid_nx", int, "grid_nx")
     _get("interp", "grid_ny", int, "grid_ny")

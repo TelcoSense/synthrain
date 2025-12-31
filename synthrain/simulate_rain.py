@@ -81,7 +81,7 @@ WetMode = Literal["threshold", "random", "stratified"]
 
 @dataclass
 class WetDrySpec:
-    wet_mode: WetMode = "threshold"
+    wet_mode: WetMode = "random"
     wet_target: float = 0.3  # desired fraction of wet links
     flip_dry_to_wet: float = 0.0  # false positive
     flip_wet_to_dry: float = 0.0  # false negative

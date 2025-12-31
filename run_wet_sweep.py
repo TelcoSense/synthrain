@@ -171,7 +171,7 @@ def main():
 
     # Save true once
     save_field_png(
-        str(out_dir / "true_field.png"),
+        str(out_dir / "true_field"),
         lon_g,
         lat_g,
         z_true,
@@ -240,7 +240,7 @@ def main():
             mode_dir.mkdir(parents=True, exist_ok=True)
 
             save_field_png(
-                str(mode_dir / "idw_field.png"),
+                str(mode_dir / "idw_field"),
                 lon_g,
                 lat_g,
                 z_idw,
@@ -251,9 +251,10 @@ def main():
                 show_links=True,
                 xlabel="lon",
                 ylabel="lat",
+                suffix="pdf",
             )
             save_field_png(
-                str(mode_dir / "diff.png"),
+                str(mode_dir / "diff"),
                 lon_g,
                 lat_g,
                 z_idw - z_true,

@@ -30,6 +30,7 @@ configs/*.ini
 
 # Output directories
 outputs/
+outputs_sweep/
 
 # OS
 .DS_Store

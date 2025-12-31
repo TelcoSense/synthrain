@@ -1,5 +1,5 @@
 """
-PNG rendering utilities.
+IMG rendering utilities.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def save_field_png_full_color(
+def save_field_image_full_color(
     path: str,
     xg: np.ndarray,
     yg: np.ndarray,
@@ -23,6 +23,7 @@ def save_field_png_full_color(
     show_links: bool = False,
     xlabel: str = "x",
     ylabel: str = "y",
+    suffix: str = "png",
 ):
     fig = plt.figure(figsize=(10, 6))
     ax = plt.gca()
@@ -57,11 +58,11 @@ def save_field_png_full_color(
         ax.legend(loc="upper right")
 
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(f"{path}.{suffix}", dpi=200)
     plt.close(fig)
 
 
-def save_field_png(
+def save_field_image(
     path: str,
     xg: np.ndarray,
     yg: np.ndarray,
@@ -74,6 +75,7 @@ def save_field_png(
     xlabel: str = "x",
     ylabel: str = "y",
     min_rain: float = 0.1,
+    suffix: str = "png",
 ):
 
     fig = plt.figure(figsize=(10, 6))
@@ -124,13 +126,16 @@ def save_field_png(
         ax.legend(loc="upper right")
 
     fig.tight_layout()
-
-    fig.savefig(path, dpi=160)
+    fig.savefig(f"{path}.{suffix}", dpi=200)
     plt.close(fig)
 
 
-def save_links_png(
-    path: str, links: pd.DataFrame, bbox, title: str = "Links (centers)"
+def save_links_image(
+    path: str,
+    links: pd.DataFrame,
+    bbox,
+    title: str = "Links (centers)",
+    suffix: str = "png",
 ):
     x_min, x_max, y_min, y_max = bbox
     fig = plt.figure(figsize=(10, 6))
@@ -161,5 +166,5 @@ def save_links_png(
     ax.set_ylabel("lat" if ycol == "lat_center" else "y")
     ax.legend(loc="upper right")
     fig.tight_layout()
-    fig.savefig(path, dpi=160)
+    fig.savefig(f"{path}.{suffix}", dpi=200)
     plt.close(fig)
