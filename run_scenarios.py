@@ -132,7 +132,7 @@ def main():
         "--idw-dist-m",
         dest="idw_dist_m",
         type=float,
-        default=30000.0,
+        default=10000,
         help="Neighbour radius (meters); set <=0 for unlimited.",
     )
     ap.add_argument(
@@ -154,6 +154,9 @@ def main():
     ap.add_argument("--csv-step-min", dest="csv_step_min", type=int, default=10)
     ap.add_argument(
         "--csv-start", dest="csv_start", type=str, default="2025-06-20 22:50:00"
+    )
+    ap.add_argument(
+        "--title-name", dest="title_name", type=str, default="IDW from links (mm/h)"
     )
 
     if defaults:
@@ -183,7 +186,7 @@ def main():
         max_length_km=args.max_length_km,
         seed=args.seed,
         site_sampling=getattr(args, "site_sampling", "uniform"),
-        site_min_dist_m=getattr(args, "site_min_dist_m", 0.0),
+        site_min_dist_m=getattr(args, "site_min_dist_m", 0),
     )
     sites, links = generate_network(net_spec, args.debug)
 
@@ -320,7 +323,7 @@ def main():
         lon_g,
         lat_g,
         z_idw,
-        title="IDW from links (mm/h)",
+        title=args.title_name,
         vmin=vmin,
         vmax=vmax,
         links=links_obs,
@@ -335,7 +338,7 @@ def main():
         lon_g,
         lat_g,
         z_idw,
-        title="IDW from links (mm/h)",
+        title=args.title_name,
         vmin=vmin,
         vmax=vmax,
         links=links_obs,

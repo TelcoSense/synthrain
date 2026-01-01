@@ -41,6 +41,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     [wet] wet_mode, wet_target, wet_min_mmph, flip_dry_to_wet, flip_wet_to_dry, wet_strata_nx, wet_strata_ny
     [csv] export_csv, csv_steps, csv_step_min, csv_start
     [sweep] wet_targets (comma-separated list, e.g. 0.05,0.1,0.2)
+    [plot] title_name (of the IDW plot)
     """
     cp = configparser.ConfigParser()
     read = cp.read(path)
@@ -97,6 +98,8 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     _get("csv", "csv_steps", int, "csv_steps")
     _get("csv", "csv_step_min", int, "csv_step_min")
     _get("csv", "csv_start", str, "csv_start")
+
+    _get("plot", "title_name", str, "title_name")
 
     if _has("sweep", "wet_targets"):
         d["wet_targets"] = cp["sweep"]["wet_targets"]

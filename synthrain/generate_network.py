@@ -33,7 +33,7 @@ class NetworkSpec:
     max_length_km: float = 30.0
     seed: int = 0
     site_sampling: str = "uniform"  # "uniform" | "poisson"
-    site_min_dist_m: float = 0.0  # used for poisson; 0 => auto
+    site_min_dist_m: float = 0  # used for poisson; 0 => auto
 
 
 def _poisson_disk_rect(
