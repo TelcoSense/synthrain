@@ -549,6 +549,7 @@ def main() -> int:
             pass
 
     return 0
+    print("Scenarios completed.")
 
 
 if __name__ == "__main__":
@@ -559,3 +560,6 @@ if __name__ == "__main__":
 # python run_idw_sweep.py --out-root outputs_sweep/nsites_grid --n-sites-list 50,75,100 --seeds 0,1,2 --wet-targets 0.1,0.33,0.5 --powers 2,2.5,3,3.5,4 --nears 4,8,12,16 --dists 20000,30000,50000
 # python run_idw_sweep.py --out-root outputs_sweep/interp_power --n-sites-list 50 --seeds 0 --wet-targets 0.1 --powers 1.0,1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0 --nears 12 --dists 10000
 # python run_idw_sweep.py --out-root outputs_sweep/interp_wet_targets --n-sites-list 50 --seeds 0 --wet-targets 0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9 --powers 2 --nears 12 --dists 10000
+# python run_idw_sweep.py --out-root outputs_sweep/interp_neighbours --n-sites-list 50 --seeds 0 --wet-targets 0.1 --powers 2 --nears 2,4,6,8,12,16,20 --dists 10000
+# python run_idw_sweep.py --out-root outputs_sweep/interp_dist --n-sites-list 50 --seeds 0 --wet-targets 0.1 --powers 2 --nears 12 --dists 1000,5000,10000,20000,30000
+# python run_idw_sweep.py --out-root outputs_sweep/run_seeds --n-sites-list 50 --seeds 0,1,2,3,4,5,6,7,8 --wet-targets 0.1 --powers 2 --nears 12 --dists 10000

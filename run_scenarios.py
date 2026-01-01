@@ -205,6 +205,19 @@ def main():
     lon_g = grid["lon_g"]
     lat_g = grid["lat_g"]
 
+    if args.debug:
+        if xg_m.ndim == 1 and yg_m.ndim == 1:
+            dx = float(np.median(np.diff(xg_m)))
+            dy = float(np.median(np.diff(yg_m)))
+            nx, ny = xg_m.size, yg_m.size
+        else:
+            dx = float(np.median(np.diff(xg_m, axis=1)))
+            dy = float(np.median(np.diff(yg_m, axis=0)))
+            ny, nx = xg_m.shape
+
+        print(f"Grid spacing: dx={dx:.3f} m, dy={dy:.3f} m")
+        print(f"Grid size: nx={nx}, ny={ny}")
+
     # 2) True field (ground truth)
     rf_spec = RainFieldSpec(
         n_blobs=args.n_blobs,

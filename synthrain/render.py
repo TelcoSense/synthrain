@@ -81,17 +81,13 @@ def save_field_image(
     fig = plt.figure(figsize=(10, 6))
     ax = plt.gca()
 
-    # mask zeros so they render as "nothing"
+    # values less than min_rain become 0
     z = np.asarray(z, dtype=float)
-    # z_masked = np.ma.masked_where(z <= 0.0, z)
-    z_masked = np.ma.masked_where(z <= min_rain, z)
+    z_masked = np.ma.masked_where(z < min_rain, z)
 
     # make masked values transparent
     cmap = plt.get_cmap("viridis").copy()
     cmap.set_bad(alpha=0.0)
-
-    # # axes background itself is transparent too
-    # ax.set_facecolor("none")
 
     # pcolormesh so irregular grids plot correctly
     im = ax.pcolormesh(
@@ -126,7 +122,7 @@ def save_field_image(
         ax.legend(loc="upper right")
 
     fig.tight_layout()
-    fig.savefig(f"{path}.{suffix}", dpi=200)
+    fig.savefig(f"{path}.{suffix}", dpi=300)
     plt.close(fig)
 
 
