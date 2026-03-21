@@ -260,3 +260,16 @@ result = run_scenario(cfg)
 write_scenario_outputs(result)
 print(result.metrics)
 ```
+
+## Acknowledgements
+
+This output was financed through the project Precipitation Detection and Quantification System Based on
+Networks of Microwave Links (SS06020416), co-funded with state support from the Technology Agency of the
+Czech Republic under the Environment for Life Programme. The project was further funded within the National
+Recovery Plan from the European Recovery and Resilience Facility.
+
+<p align="center">
+  <img src="assets/tacr.png" alt="Technology Agency of the Czech Republic" height="64" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/eu.png" alt="European Union" height="64" />
+</p>
