@@ -1,7 +1,7 @@
 """
 INI config support.
 
-Goal: allow running scenarios without dozens of CLI flags, similarly to TelcoRain's config.ini.
+Goal: allow running scenarios without dozens of CLI flags.
 
 - Provide --config path/to/config.ini
 - Values in CLI override values from config.
@@ -22,6 +22,12 @@ def _parse_bool(v: str) -> bool:
     raise ValueError(f"Invalid boolean: {v}")
 
 
+def _parse_str(v: str) -> str:
+    s = str(v).strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1].strip()
+    return s
+
 def _parse_bbox(v: str) -> Tuple[float, float, float, float]:
     parts = [float(p.strip()) for p in str(v).split(",")]
     if len(parts) != 4:
@@ -35,7 +41,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
 
     Supported sections/keys:
     [io] out, debug, seed
-    [network] n_sites, mean_degree, bbox, city, min_length_km, max_length_km
+    [network] n_sites, mean_degree, bbox, city, city_bbox, noncity_bbox, min_length_km, max_length_km
     [interp] interp_style, grid_step_m, grid_nx, grid_ny, idw_power, idw_near, idw_dist_m, dry_as_zero
     [rain] n_blobs, blob_sigma_m, peak_mmph, noise_mmph, min_rain
     [wet] wet_mode, wet_target, wet_min_mmph, flip_dry_to_wet, flip_wet_to_dry, wet_strata_nx, wet_strata_ny
@@ -43,7 +49,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     [sweep] wet_targets (comma-separated list, e.g. 0.05,0.1,0.2)
     [plot] title_name (of the IDW plot)
     """
-    cp = configparser.ConfigParser()
+    cp = configparser.ConfigParser(inline_comment_prefixes=(";", "#"))
     read = cp.read(path)
     if not read:
         raise FileNotFoundError(path)
@@ -57,7 +63,7 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
         if _has(sec, key):
             d[dest] = cast(cp[sec][key])
 
-    _get("io", "out", str, "out")
+    _get("io", "out", _parse_str, "out")
     _get("io", "seed", int, "seed")
     _get("io", "debug", _parse_bool, "debug")
 
@@ -65,13 +71,17 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     _get("network", "mean_degree", int, "mean_degree")
     if _has("network", "bbox"):
         d["bbox"] = _parse_bbox(cp["network"]["bbox"])
+    if _has("network", "city_bbox"):
+        d["city_bbox"] = _parse_bbox(cp["network"]["city_bbox"])
+    if _has("network", "noncity_bbox"):
+        d["noncity_bbox"] = _parse_bbox(cp["network"]["noncity_bbox"])
     _get("network", "city", _parse_bool, "city")
     _get("network", "min_length_km", float, "min_length_km")
     _get("network", "max_length_km", float, "max_length_km")
-    _get("network", "site_sampling", str, "site_sampling")
+    _get("network", "site_sampling", _parse_str, "site_sampling")
     _get("network", "site_min_dist_m", float, "site_min_dist_m")
 
-    _get("interp", "interp_style", str, "interp_style")
+    _get("interp", "interp_style", _parse_str, "interp_style")
     _get("interp", "grid_step_m", float, "grid_step_m")
     _get("interp", "grid_nx", int, "grid_nx")
     _get("interp", "grid_ny", int, "grid_ny")
@@ -97,11 +107,12 @@ def load_ini_defaults(path: str) -> Dict[str, Any]:
     _get("csv", "export_csv", _parse_bool, "export_csv")
     _get("csv", "csv_steps", int, "csv_steps")
     _get("csv", "csv_step_min", int, "csv_step_min")
-    _get("csv", "csv_start", str, "csv_start")
+    _get("csv", "csv_start", _parse_str, "csv_start")
 
-    _get("plot", "title_name", str, "title_name")
+    _get("plot", "title_name", _parse_str, "title_name")
 
     if _has("sweep", "wet_targets"):
-        d["wet_targets"] = cp["sweep"]["wet_targets"]
+        d["wet_targets"] = _parse_str(cp["sweep"]["wet_targets"])
 
     return d
+

@@ -35,3 +35,10 @@ outputs_sweep/
 # OS
 .DS_Store
 Thumbs.db
+
+# Custom
+synthrain.zip
+outputs/*
+outputs_sweep/*
+outputs_wet_sweep/*
+logs/*

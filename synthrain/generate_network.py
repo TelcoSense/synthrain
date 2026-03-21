@@ -17,6 +17,7 @@ import pandas as pd
 from scipy.spatial import cKDTree
 
 from .geo import lonlat_to_mercator_m, mercator_m_to_lonlat, haversine_km
+from .run_logging import log_info
 
 
 @dataclass
@@ -226,12 +227,10 @@ def generate_network(
     sites = generate_sites(spec)
     links = generate_links(sites, spec)
     if debug:
-        print("---------------- sites info ----------------")
-        print("n_sites returned:", len(sites))
-        print("lon range:", sites.lon.min(), sites.lon.max())
-        print("lat range:", sites.lat.min(), sites.lat.max())
-        print("bbox:", spec.bbox)
-        print("--------------------------------------------")
+        log_info("NETWORK", f"sites returned: {len(sites)}")
+        log_info("NETWORK", f"lon range: {sites.lon.min()} .. {sites.lon.max()}")
+        log_info("NETWORK", f"lat range: {sites.lat.min()} .. {sites.lat.max()}")
+        log_info("NETWORK", f"bbox: {spec.bbox}")
 
         # min pairwise distance in meters (should be >= site_min_dist_m-ish)
         from scipy.spatial import cKDTree
@@ -241,6 +240,6 @@ def generate_network(
         d, _ = tree.query(
             np.c_[x, y], k=2
         )  # first neighbor is itself, second is nearest other
-        print("min nn dist [m]:", float(np.min(d[:, 1])))
+        log_info("NETWORK", f"min nn dist [m]: {float(np.min(d[:, 1]))}")
 
     return sites, links

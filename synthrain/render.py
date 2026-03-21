@@ -10,6 +10,20 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+plt.rcParams.update(
+    {
+        "font.size": 14,
+        "axes.titlesize": 18,
+        "axes.labelsize": 16,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 14,
+    }
+)
+
+tight: bool = True
+pad_inches: float = 0.0
+
 
 def save_field_image_full_color(
     path: str,
@@ -58,7 +72,7 @@ def save_field_image_full_color(
         ax.legend(loc="upper right")
 
     fig.tight_layout()
-    fig.savefig(f"{path}.{suffix}", dpi=200)
+    fig.savefig(f"{path}.{suffix}", dpi=200, bbox_inches="tight", pad_inches=pad_inches)
     plt.close(fig)
 
 
@@ -122,7 +136,7 @@ def save_field_image(
         ax.legend(loc="upper right")
 
     fig.tight_layout()
-    fig.savefig(f"{path}.{suffix}", dpi=300)
+    fig.savefig(f"{path}.{suffix}", dpi=300, bbox_inches="tight", pad_inches=pad_inches)
     plt.close(fig)
 
 
@@ -162,5 +176,5 @@ def save_links_image(
     ax.set_ylabel("lat" if ycol == "lat_center" else "y")
     ax.legend(loc="upper right")
     fig.tight_layout()
-    fig.savefig(f"{path}.{suffix}", dpi=200)
+    fig.savefig(f"{path}.{suffix}", dpi=200, bbox_inches="tight", pad_inches=pad_inches)
     plt.close(fig)

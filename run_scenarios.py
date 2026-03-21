@@ -1,10 +1,5 @@
 """
 Main CLI: generate synthetic network, simulate wet/dry, run IDW, save PNGs (+ optional CSV).
-
-Example:
-python run_scenarios.py --out out_demo --seed 0 --city --n-sites 250 --mean-degree 3 \
-  --wet-target 0.35 --wet-mode threshold --flip-dry-to-wet 0.03 --flip-wet-to-dry 0.15 \
-  --idw-near 12 --idw-power 2.0 --idw-dist 0.15 --dry-as-zero --export-csv
 """
 
 from __future__ import annotations
@@ -33,12 +28,11 @@ from synthrain.simulate_rain import (
 from synthrain.idw import IdwKdtree
 from synthrain.render import save_field_image, save_links_image
 from synthrain.csv_export import (
-    CsvSpec,
     CsvSpecMinimal,
-    export_calc_dataset_csv,
     export_synth_minimal_csv,
 )
 from synthrain.geo import GridSpec, make_grid, lonlat_to_mercator_m
+from synthrain.run_logging import format_path, log_info, setup_tee_logging
 
 
 def parse_bbox(s: str):
@@ -57,6 +51,12 @@ def main():
         default="configs/config.ini",
         help="INI config file (TelcoRain-like). CLI flags override it.",
     )
+    pre.add_argument(
+        "--log-dir", default="logs", help="Directory for datetime log files"
+    )
+    pre.add_argument("--log-to-file", action="store_true", default=True)
+    pre.add_argument("--no-log-to-file", dest="log_to_file", action="store_false")
+    pre.add_argument("--quiet-run", action="store_true", help="Reduce non-essential console output")
     pre_args, _ = pre.parse_known_args()
 
     defaults = {}
@@ -67,6 +67,12 @@ def main():
 
     ap.add_argument("--out", required=("out" not in defaults), help="Output directory")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument(
+        "--debug",
+        dest="debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
 
     # Network
     ap.add_argument("--n-sites", dest="n_sites", type=int, default=100)
@@ -88,12 +94,26 @@ def main():
     ap.add_argument("--grid-step-m", dest="grid_step_m", type=float, default=1000.0)
     ap.add_argument("--grid-nx", dest="grid_nx", type=int, default=None)
     ap.add_argument("--grid-ny", dest="grid_ny", type=int, default=None)
+    ap.add_argument(
+        "--interp-style",
+        dest="interp_style",
+        choices=["pycomlink", "custom"],
+        default="pycomlink",
+        help="Interpolation backend.",
+    )
 
     # True field (on the interpolation grid)
     ap.add_argument("--n-blobs", dest="n_blobs", type=int, default=4)
     ap.add_argument("--blob-sigma-m", dest="blob_sigma_m", type=float, default=8000.0)
     ap.add_argument("--peak-mmph", dest="peak_mmph", type=float, default=15.0)
     ap.add_argument("--noise-mmph", dest="noise_mmph", type=float, default=0.6)
+    ap.add_argument(
+        "--min-rain",
+        dest="min_rain",
+        type=float,
+        default=0.0,
+        help="Post-IDW threshold; values below become 0.",
+    )
 
     # Wet/dry
     ap.add_argument(
@@ -163,19 +183,23 @@ def main():
         ap.set_defaults(**defaults)
 
     args = ap.parse_args()
+    setup_tee_logging(args.log_dir, enabled=bool(args.log_to_file))
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not args.quiet_run:
+        log_info("SCENARIO", f"output directory: {format_path(out_dir)}")
 
     # bbox
     if args.bbox is not None:
         bbox_ll = args.bbox
     else:
-        # Rough Czechia bbox by default (synthetic still)
-        bbox_ll = (12.0, 19.0, 48.5, 51.2)
-        if args.city:
-            # Smaller area around Prague-like bbox (still synthetic)
-            bbox_ll = (14.2, 14.8, 49.9, 50.2)
+        # Default presets, overridable from INI via [network] city_bbox/noncity_bbox
+        default_noncity_bbox = (12.0, 19.0, 48.5, 51.2)
+        default_city_bbox = (14.2, 14.8, 49.9, 50.2)
+        noncity_bbox = tuple(getattr(args, "noncity_bbox", default_noncity_bbox))
+        city_bbox = tuple(getattr(args, "city_bbox", default_city_bbox))
+        bbox_ll = city_bbox if args.city else noncity_bbox
 
     # 1) Network
     net_spec = NetworkSpec(
@@ -214,9 +238,9 @@ def main():
             dx = float(np.median(np.diff(xg_m, axis=1)))
             dy = float(np.median(np.diff(yg_m, axis=0)))
             ny, nx = xg_m.shape
-
-        print(f"Grid spacing: dx={dx:.3f} m, dy={dy:.3f} m")
-        print(f"Grid size: nx={nx}, ny={ny}")
+        if not args.quiet_run:
+            log_info("GRID", f"spacing: dx={dx:.3f} m, dy={dy:.3f} m")
+            log_info("GRID", f"size: nx={nx}, ny={ny}")
 
     # 2) True field (ground truth)
     rf_spec = RainFieldSpec(
@@ -425,7 +449,8 @@ def main():
     (out_dir / "scenario.json").write_text(
         __import__("json").dumps(meta, indent=2), encoding="utf-8"
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
