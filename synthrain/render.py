@@ -1,6 +1,4 @@
-"""
-IMG rendering utilities.
-"""
+"""Rendering utilities for scenario outputs."""
 
 from __future__ import annotations
 
@@ -21,59 +19,54 @@ plt.rcParams.update(
     }
 )
 
-tight: bool = True
 pad_inches: float = 0.0
 
 
-def save_field_image_full_color(
-    path: str,
-    xg: np.ndarray,
-    yg: np.ndarray,
-    z: np.ndarray,
-    title: str = "",
-    vmin=None,
-    vmax=None,
-    links: Optional[pd.DataFrame] = None,
-    show_links: bool = False,
-    xlabel: str = "x",
-    ylabel: str = "y",
-    suffix: str = "png",
-):
-    fig = plt.figure(figsize=(10, 6))
-    ax = plt.gca()
-    # Use pcolormesh so irregular grids (e.g. inverse Mercator -> lon/lat) plot correctly
-    im = ax.pcolormesh(xg, yg, z, shading="auto", vmin=vmin, vmax=vmax)
-    plt.colorbar(im, ax=ax, label="mm/h")
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+def _scatter_links(ax, links: pd.DataFrame) -> None:
+    wet = links["wet"].to_numpy(bool)
+    available = (
+        links["available"].to_numpy(bool)
+        if "available" in links.columns
+        else np.ones(len(links), dtype=bool)
+    )
+    xcol = "lon_center" if "lon_center" in links.columns else "x_center"
+    ycol = "lat_center" if "lat_center" in links.columns else "y_center"
 
-    if show_links and links is not None and len(links) > 0:
-        wet = links["wet"].to_numpy(bool)
-        # Plot in lon/lat if available, else fall back to x_center/y_center
-        xcol = "lon_center" if "lon_center" in links.columns else "x_center"
-        ycol = "lat_center" if "lat_center" in links.columns else "y_center"
+    unavailable = ~available
+    dry = available & ~wet
+    wet_ok = available & wet
+
+    if np.any(unavailable):
         ax.scatter(
-            links.loc[~wet, xcol],
-            links.loc[~wet, ycol],
+            links.loc[unavailable, xcol],
+            links.loc[unavailable, ycol],
+            s=20,
+            marker="s",
+            alpha=0.9,
+            color="tab:gray",
+            label="unavailable",
+        )
+    if np.any(dry):
+        ax.scatter(
+            links.loc[dry, xcol],
+            links.loc[dry, ycol],
             s=12,
             marker="x",
             alpha=0.8,
+            color="tab:orange",
             label="dry",
         )
+    if np.any(wet_ok):
         ax.scatter(
-            links.loc[wet, xcol],
-            links.loc[wet, ycol],
+            links.loc[wet_ok, xcol],
+            links.loc[wet_ok, ycol],
             s=18,
             marker="o",
             alpha=0.8,
+            color="tab:blue",
             label="wet",
         )
-        ax.legend(loc="upper right")
-
-    fig.tight_layout()
-    fig.savefig(f"{path}.{suffix}", dpi=200, bbox_inches="tight", pad_inches=pad_inches)
-    plt.close(fig)
+    ax.legend(loc="upper right")
 
 
 def save_field_image(
@@ -114,26 +107,7 @@ def save_field_image(
     ax.set_ylabel(ylabel)
 
     if show_links and links is not None and len(links) > 0:
-        wet = links["wet"].to_numpy(bool)
-        xcol = "lon_center" if "lon_center" in links.columns else "x_center"
-        ycol = "lat_center" if "lat_center" in links.columns else "y_center"
-        ax.scatter(
-            links.loc[~wet, xcol],
-            links.loc[~wet, ycol],
-            s=12,
-            marker="x",
-            alpha=0.8,
-            label="dry",
-        )
-        ax.scatter(
-            links.loc[wet, xcol],
-            links.loc[wet, ycol],
-            s=18,
-            marker="o",
-            alpha=0.8,
-            label="wet",
-        )
-        ax.legend(loc="upper right")
+        _scatter_links(ax, links)
 
     fig.tight_layout()
     fig.savefig(f"{path}.{suffix}", dpi=300, bbox_inches="tight", pad_inches=pad_inches)
@@ -150,31 +124,14 @@ def save_links_image(
     x_min, x_max, y_min, y_max = bbox
     fig = plt.figure(figsize=(10, 6))
     ax = plt.gca()
-    wet = links["wet"].to_numpy(bool)
     xcol = "lon_center" if "lon_center" in links.columns else "x_center"
     ycol = "lat_center" if "lat_center" in links.columns else "y_center"
-    ax.scatter(
-        links.loc[~wet, xcol],
-        links.loc[~wet, ycol],
-        s=12,
-        marker="x",
-        alpha=0.8,
-        label="dry",
-    )
-    ax.scatter(
-        links.loc[wet, xcol],
-        links.loc[wet, ycol],
-        s=18,
-        marker="o",
-        alpha=0.8,
-        label="wet",
-    )
+    _scatter_links(ax, links)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     ax.set_title(title)
     ax.set_xlabel("lon" if xcol == "lon_center" else "x")
     ax.set_ylabel("lat" if ycol == "lat_center" else "y")
-    ax.legend(loc="upper right")
     fig.tight_layout()
     fig.savefig(f"{path}.{suffix}", dpi=200, bbox_inches="tight", pad_inches=pad_inches)
     plt.close(fig)

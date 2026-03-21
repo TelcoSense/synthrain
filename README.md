@@ -1,175 +1,262 @@
-# SynthRain
+# telcorain_synth
 
-This repository is a standalone testbed for TelcoRain-like interpolation behavior without database dependencies. 
-Synthetic CML network + synthetic wet/dry classification + synthetic rainfall field -> IDW interpolation.
+Lightweight synthetic testbed for TelcoRain-like rainfall interpolation.
 
+The repository is built for one specific job: generate configurable CML-like
+networks, inject realistic wet/dry and failure behavior, run IDW, and compare
+the reconstructed field against known synthetic truth without needing real CML
+data or database access.
 
+## What It Simulates
 
-## Repository layout
+- Synthetic CML site and link networks inside a configurable bbox
+- Synthetic rainfall fields built from smooth rain blobs
+- Wet/dry labels with target wet fraction and misclassification
+- Path-averaged link observations instead of center-only sampling
+- Faulty or missing links:
+  - nonresponding links
+  - clustered outages
+  - stuck-at-zero links
+  - biased links
+  - extra-noisy links
+- IDW interpolation with either:
+  - `pycomlink`
+  - built-in custom KDTree backend
 
+## Repository Layout
+
+- `run_scenario.py`
+  - Main single-scenario CLI
 - `run_scenarios.py`
-  - Main single-scenario runner (network generation, wet/dry simulation, IDW, plots, optional CSV).
+  - Backward-compatible wrapper to `run_scenario.py`
 - `run_wet_sweep.py`
-  - Thin CLI wrapper for wet-target sweep.
+  - Thin CLI wrapper for wet-target sweeps
 - `run_idw_sweep.py`
-  - Thin CLI wrapper for IDW parameter sweep.
+  - Thin CLI wrapper for IDW parameter sweeps
+- `synthrain/config.py`
+  - Typed config model and INI loading
+- `synthrain/scenario.py`
+  - Pure library entrypoint: `run_scenario(config)`
+- `synthrain/outputs.py`
+  - Plot, CSV, and metadata writing
+- `synthrain/metrics.py`
+  - Field evaluation metrics
 - `synthrain/sweeps.py`
-  - Shared sweep logic used by both wrapper scripts.
-- `synthrain/run_logging.py`
-  - Console tee logging to `logs/<YYYYmmdd_HHMMSS>.log`.
+  - Direct sweep execution and summary CSV creation
 - `configs/config.ini`
-  - Default INI config used by runners.
+  - Example config
 
 ## Install
 
-```bash
-pip install numpy pandas scipy matplotlib pillow pycomlink pypdf tqdm
-```
-
-Notes:
-- `pypdf` is used for vector PDF merge/contact sheets.
-- There is a fallback to `PyPDF2` if `pypdf` is not available.
-
-## Single scenario
-
-Run using config defaults:
+Editable install:
 
 ```bash
-python run_scenarios.py --config configs/config.ini
+pip install -e .
 ```
 
-Run with CLI overrides:
+With `pycomlink` backend:
 
 ```bash
-python run_scenarios.py --config configs/config.ini --wet-target 0.2 --seed 0 --idw-near 12
+pip install -e .[pycomlink]
 ```
 
-Typical outputs in `io.out` folder:
+For development:
+
+```bash
+pip install -e .[dev]
+```
+
+## Single Scenario
+
+Run from config:
+
+```bash
+python run_scenario.py --config configs/config.ini
+```
+
+Override selected parameters:
+
+```bash
+python run_scenario.py --config configs/config.ini --wet-target 0.2 --seed 7 --idw-near 12
+```
+
+Use the custom backend without `pycomlink`:
+
+```bash
+python run_scenario.py --config configs/config.ini --interp-style custom
+```
+
+Example fault injection:
+
+```bash
+python run_scenario.py --config configs/config.ini --interp-style custom --outage-fraction 0.15 --clustered-outage-fraction 0.2 --stuck-zero-fraction 0.1
+```
+
+Typical outputs:
+
 - `true_field.png`
 - `links.png`
 - `idw_field.png`
 - `idw_field.pdf`
 - `diff.png`
 - `scenario.json`
-- `calc_dataset_synth.csv` (only when CSV export is enabled)
+- `calc_dataset_synth.csv`
 
-## Wet sweep
+`scenario.json` now includes config, metrics, and realized fault counts.
+
+## Sweeps
+
+Wet-target sweep:
 
 ```bash
 python run_wet_sweep.py --base-config configs/config.ini --out-root outputs_wet_sweep
 ```
 
-Optional overrides:
-
-```bash
-python run_wet_sweep.py --base-config configs/config.ini --wet-targets 0.05,0.1,0.2,0.4 --seed 0 --n-sites 75
-```
-
-## IDW sweep
+IDW sweep:
 
 ```bash
 python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep
 ```
 
-Example focused sweep:
+Focused IDW sweep:
 
 ```bash
 python run_idw_sweep.py --base-config configs/config.ini --powers 1,2,3 --nears 4,8,12 --dists 10000,30000 --n-sites-list 50 --seeds 0 --wet-targets 0.1
 ```
 
-## Logging
+Each sweep writes metric tables using values such as:
 
-All run scripts support:
-- `--log-dir` (default: `logs`)
-- `--log-to-file` / `--no-log-to-file`
+- `rmse`
+- `mae`
+- `bias`
+- `pearson_r`
+- `valid_pixel_fraction`
+- `wet_hit_rate`
+- `wet_miss_rate`
+- `dry_false_rain_rate`
 
-When enabled, console output is mirrored to:
+Wet sweep is comparison-oriented:
 
 ```text
-logs/YYYYmmdd_HHMMSS.log
+outputs_wet_sweep/
+  comparison.csv
+  summary.csv
+  manifest.json
+  scenarios/
+    wet0.1/
+      summary.csv
+      run/
+  reports/
+    global/
+      all_runs.csv
+      wet_sweep_metrics.png
 ```
 
-Important behavior:
-- `--help` does not create log files.
-- Sweep scripts call `run_scenarios.py` with `--no-log-to-file` to avoid nested log files.
+IDW sweep is ranking-oriented because each scenario contains many IDW parameter combinations:
 
-## Config behavior
+```text
+outputs_sweep/
+  leaderboard.csv
+  summary.csv
+  manifest.json
+  scenarios/
+    <scenario_tag>/
+      summary.csv
+      best_run.json
+      reports/
+      runs/
+        <run_tag>/
+  reports/
+    global/
+      all_runs.csv
+      best_per_scenario.csv
+      best_per_scenario_contact_sheet.pdf
+```
 
-- INI values are loaded from `--config` (default `configs/config.ini`).
-- CLI flags override INI values.
-- Inline comments are supported (for example: `idw_near = 8 ; max neighbours per pixel`).
+Notes:
 
-## Config quick reference (with row comments)
+- `scenarios/.../runs/...` contains the raw scenario artifacts.
+- `scenarios/.../reports/` contains derived visual summaries such as contact sheets and heatmaps.
+- Wet sweep writes `comparison.csv` because there is only one run per wet-target scenario, so ranking would be meaningless.
+- IDW sweep writes `leaderboard.csv` because it compares multiple parameter combinations inside each scenario.
+- `best_run.json` is only used for IDW sweep scenarios.
+- IDW sweeps use metrics to choose representative runs for global reports instead of taking the first run arbitrarily.
+
+## Config
+
+Config precedence:
+
+1. built-in defaults
+2. values from `--config`
+3. CLI overrides
+
+Key sections:
 
 ```ini
 [io]
-out = outputs                  ; output directory for one scenario
-debug = true                   ; extra console debug info
-seed = 0                       ; random seed
+out = outputs ; output directory for one scenario
+debug = true ; enable extra console diagnostics
+seed = 0 ; base random seed for the whole scenario
 
 [network]
-city = true                    ; use compact city bbox preset
-city_bbox = 14.2,14.8,49.9,50.2 ; bbox used when city=true
-noncity_bbox = 12.0,19.0,48.5,51.2 ; bbox used when city=false
-; bbox = 12.0,19.0,48.5,51.2   ; explicit bbox override (highest priority)
-n_sites = 50                   ; number of CML sites
-mean_degree = 4                ; average link connectivity
-site_sampling = poisson        ; uniform | poisson
-site_min_dist_m = 3000         ; minimum spacing between sites (poisson mode)
+city = true ; use compact city bbox preset instead of noncity bbox
+city_bbox = 14.2,14.8,49.9,50.2 ; dense urban test area
+noncity_bbox = 12.0,19.0,48.5,51.2 ; larger country-scale test area
+n_sites = 50 ; number of synthetic microwave sites
+mean_degree = 4 ; approximate average number of links per site
+site_sampling = poisson ; site placement mode: poisson or uniform
+site_min_dist_m = 3000 ; minimum site spacing in poisson mode
 
 [interp]
-interp_style = "pycomlink"     ; pycomlink | custom
-grid_step_m = 1000.0           ; grid resolution in meters
-idw_power = 2                  ; IDW power parameter p
-idw_near = 8                   ; max neighbours used per grid point
-idw_dist_m = 10000             ; neighbour radius in meters (<=0 means unlimited)
-dry_as_zero = true             ; true: dry links contribute as 0, false: ignored
+interp_style = "pycomlink" ; interpolation backend: pycomlink or custom
+grid_step_m = 1000.0 ; interpolation grid resolution in meters
+idw_power = 2 ; inverse-distance weighting power
+idw_near = 8 ; maximum neighbours used per grid point
+idw_dist_m = 10000 ; maximum search radius in meters, <=0 means unlimited
+dry_as_zero = true ; include dry links as zero instead of ignoring them
 
 [rain]
-n_blobs = 6                    ; number of synthetic rain cells
-blob_sigma_m = 6000.0          ; rain cell spread in meters
-peak_mmph = 25.0               ; max rain intensity
-noise_mmph = 1.0               ; link observation noise
-min_rain = 0.1                 ; plotting/threshold minimum rain
+n_blobs = 6 ; number of synthetic rain cells
+blob_sigma_m = 6000.0 ; characteristic rain-cell width
+peak_mmph = 25.0 ; peak rainfall intensity
+background_mmph = 0.0 ; uniform background rainfall level
+min_rain = 0.1 ; plotting and wet/dry threshold floor
 
 [wet]
-wet_mode = random              ; threshold | random | stratified
-wet_target = 0.10              ; target wet fraction
-wet_strata_nx = 8              ; stratified mode x bins
-wet_strata_ny = 8              ; stratified mode y bins
-flip_dry_to_wet = 0.02         ; random flip probability
-flip_wet_to_dry = 0.10         ; random flip probability
+wet_mode = random ; wet/dry assignment mode: threshold, random, stratified
+wet_target = 0.10 ; target fraction of wet links
+wet_strata_nx = 8 ; stratified mode: number of x-direction bins
+wet_strata_ny = 8 ; stratified mode: number of y-direction bins
+flip_dry_to_wet = 0.02 ; dry-to-wet label error probability
+flip_wet_to_dry = 0.10 ; wet-to-dry label error probability
 
-[plot]
-make_plot_titles = false       ; if true, sweeps inject per-run plot titles
-title_name = IDW from links (mm/h) ; scenario plot title
+[observation]
+noise_mmph = 1.0 ; baseline observation noise added to links
+link_path_samples = 9 ; samples taken along each link path before averaging
 
-[sweep]
-wet_targets = 0.05,0.10,0.20,0.35,0.50 ; used by wet sweep when CLI value is omitted
+[faults]
+outage_fraction = 0.00 ; fraction of links removed as unavailable
+clustered_outage_fraction = 0.00 ; fraction removed in one spatial outage cluster
+stuck_zero_fraction = 0.00 ; fraction of links forced to always report zero
+bias_fraction = 0.00 ; fraction of links with multiplicative bias
+bias_low = 0.85 ; lower bound of multiplicative bias factor
+bias_high = 1.15 ; upper bound of multiplicative bias factor
+extra_noise_fraction = 0.00 ; fraction of links with additional noise
+extra_noise_mmph = 2.0 ; extra noise sigma added to selected links
 ```
 
-## CLI quick reference (with row comments)
+## Python API
 
-Wet sweep:
-- `--base-config configs/config.ini` : INI source
-- `--out-root outputs_wet_sweep` : root folder for sweep results
-- `--wet-targets 0.05,0.1,0.2` : optional override of `[sweep] wet_targets`
-- `--seed 0` : optional fixed seed override
-- `--n-sites 75` : optional fixed `n_sites` override
+You can also run scenarios directly from Python:
 
-IDW sweep:
-- `--base-config configs/config.ini` : INI source
-- `--out-root outputs_sweep` : root folder for sweep results
-- `--powers 1,2,3` : IDW power sweep
-- `--nears 4,8,12` : IDW neighbour-count sweep
-- `--dists 10000,30000` : IDW radius sweep (meters)
-- `--n-sites-list 50` : outer sweep for network size
-- `--seeds 0,1` : outer sweep for random seeds
-- `--wet-targets 0.1,0.3` : outer sweep for wet fractions
+```python
+from dataclasses import replace
 
-## IDW behavior
+from synthrain import load_scenario_config, run_scenario, write_scenario_outputs
 
-- `idw_dist_m` sets neighbor radius in meters (`<= 0` means unlimited radius).
-- `idw_near` caps maximum neighbors used at each grid point.
-- `dry_as_zero=true` includes dry links as 0 in interpolation.
-- `dry_as_zero=false` completely ignores dry links in interpolation.
+cfg = load_scenario_config("configs/config.ini")
+cfg = replace(cfg, interp=replace(cfg.interp, interp_style="custom", idw_near=12))
+result = run_scenario(cfg)
+write_scenario_outputs(result)
+print(result.metrics)
+```

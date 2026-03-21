@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telcorain-synth"
+version = "0.1.0"
+description = "Synthetic CML rainfall and IDW interpolation testbed inspired by TelcoRain."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "xistva02" }]
+dependencies = [
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "pillow",
+  "pypdf",
+  "scipy",
+]
+
+[project.optional-dependencies]
+pycomlink = ["pycomlink"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+synthrain-scenario = "run_scenario:main"
+synthrain-wet-sweep = "run_wet_sweep:main"
+synthrain-idw-sweep = "run_idw_sweep:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["synthrain*"]
