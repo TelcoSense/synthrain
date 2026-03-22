@@ -277,7 +277,7 @@ To reproduce results in the poster of OpenSense conference 2026, run:
 or
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\generate_poster_outputs.ps1
+.\scripts\generate_poster_outputs.ps1
 ```
 
 ## Acknowledgements
