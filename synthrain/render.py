@@ -8,18 +8,30 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-plt.rcParams.update(
-    {
-        "font.size": 14,
-        "axes.titlesize": 18,
-        "axes.labelsize": 16,
-        "xtick.labelsize": 14,
-        "ytick.labelsize": 14,
-        "legend.fontsize": 14,
-    }
-)
-
 pad_inches: float = 0.0
+
+_BASE_PLOT_STYLE = {
+    "font.size": 14.0,
+    "axes.titlesize": 18.0,
+    "axes.labelsize": 16.0,
+    "xtick.labelsize": 14.0,
+    "ytick.labelsize": 14.0,
+    "legend.fontsize": 14.0,
+}
+
+
+def get_plot_style(plot_cfg=None) -> dict[str, float]:
+    scale = 1.0 if plot_cfg is None else float(getattr(plot_cfg, "font_scale", 1.0))
+    style = {key: value * scale for key, value in _BASE_PLOT_STYLE.items()}
+    style["contact_sheet_title_size"] = 9.0 * scale
+    style["figure_title_size"] = 14.0 * scale
+    return style
+
+
+def apply_plot_style(plot_cfg=None) -> dict[str, float]:
+    style = get_plot_style(plot_cfg)
+    plt.rcParams.update({key: value for key, value in style.items() if "." in key})
+    return style
 
 
 def _scatter_links(ax, links: pd.DataFrame) -> None:

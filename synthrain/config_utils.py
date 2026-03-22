@@ -52,5 +52,7 @@ def load_ini_defaults(path: str) -> dict[str, Any]:
         "csv_step_min": cfg.csv.csv_step_min,
         "csv_start": cfg.csv.csv_start,
         "title_name": cfg.plot.title_name,
+        "show_titles": cfg.plot.show_titles,
+        "font_scale": cfg.plot.font_scale,
         "wet_targets": ",".join(str(x) for x in cfg.sweep.wet_targets),
     }

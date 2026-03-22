@@ -39,6 +39,7 @@ Thumbs.db
 
 # Custom
 synthrain.zip
+poster_outputs/*
 outputs/*
 outputs_sweep/*
 outputs_wet_sweep/*

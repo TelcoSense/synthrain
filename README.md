@@ -243,6 +243,11 @@ bias_low = 0.85 ; lower bound of multiplicative bias factor
 bias_high = 1.15 ; upper bound of multiplicative bias factor
 extra_noise_fraction = 0.00 ; fraction of links with additional noise
 extra_noise_mmph = 2.0 ; extra noise sigma added to selected links
+
+[plot]
+title_name = IDW from links (mm/h) ; title used for the IDW field when titles are enabled
+show_titles = true ; if false, suppress titles in scenario and sweep exports
+font_scale = 1.0 ; global scale multiplier for plot/title/label font sizes
 ```
 
 ## Python API
@@ -259,6 +264,20 @@ cfg = replace(cfg, interp=replace(cfg.interp, interp_style="custom", idw_near=12
 result = run_scenario(cfg)
 write_scenario_outputs(result)
 print(result.metrics)
+```
+
+## Poster
+
+To reproduce results in the poster of OpenSense conference 2026, run:
+
+```bash
+./scripts/generate_poster_outputs.sh
+```
+
+or
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\generate_poster_outputs.ps1
 ```
 
 ## Acknowledgements

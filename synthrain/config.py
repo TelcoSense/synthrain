@@ -114,6 +114,8 @@ class CsvConfig:
 @dataclass(frozen=True)
 class PlotConfig:
     title_name: str = "IDW from links (mm/h)"
+    show_titles: bool = True
+    font_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,8 @@ def load_scenario_config(path: str | Path | None = None) -> ScenarioConfig:
         plot=replace(
             cfg.plot,
             title_name=_get(cp, "plot", "title_name", _parse_str, cfg.plot.title_name),
+            show_titles=_get(cp, "plot", "show_titles", _parse_bool, cfg.plot.show_titles),
+            font_scale=_get(cp, "plot", "font_scale", float, cfg.plot.font_scale),
         ),
         sweep=replace(
             cfg.sweep,

@@ -21,6 +21,12 @@ def _tagify_float(x: float) -> str:
     return s.rstrip("0").rstrip(".")
 
 
+def _apply_plot_style(plot_cfg=None) -> dict[str, float]:
+    from synthrain.render import apply_plot_style
+
+    return apply_plot_style(plot_cfg)
+
+
 def _auto_grid(n: int, max_per_page: int = 25) -> tuple[int, int, int]:
     if n <= 0:
         return 1, 1, 1
@@ -31,7 +37,14 @@ def _auto_grid(n: int, max_per_page: int = 25) -> tuple[int, int, int]:
 
 
 def _make_pdf_contact_sheet(
-    images: list[Path], out_pdf: Path, title: str, max_per_page: int
+    images: list[Path],
+    out_pdf: Path,
+    title: str,
+    max_per_page: int,
+    show_titles: bool = True,
+    show_subplot_titles: bool | None = None,
+    show_figure_title: bool | None = None,
+    plot_cfg=None,
 ) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
@@ -45,20 +58,35 @@ def _make_pdf_contact_sheet(
     n = len(images)
     _, _, per_page = _auto_grid(n, max_per_page=max_per_page)
     n_pages = max(1, math.ceil(n / per_page))
+    style = _apply_plot_style(plot_cfg)
+    subplot_titles_enabled = (
+        show_titles if show_subplot_titles is None else bool(show_subplot_titles)
+    )
+    figure_title_enabled = (
+        show_titles if show_figure_title is None else bool(show_figure_title)
+    )
 
     with PdfPages(out_pdf) as pdf:
         for page in range(n_pages):
             start = page * per_page
             chunk = images[start : start + per_page]
             rows, cols, _ = _auto_grid(len(chunk), max_per_page=max_per_page)
-            fig = plt.figure(figsize=(cols * 4.2, rows * 3.2))
+            fig = plt.figure(figsize=(cols * 4.0, rows * 3.0))
             for i, img_path in enumerate(chunk):
                 ax = fig.add_subplot(rows, cols, i + 1)
                 ax.imshow(Image.open(img_path))
                 ax.set_axis_off()
-                ax.set_title(img_path.stem, fontsize=9)
-            fig.suptitle(f"{title} (page {page + 1}/{n_pages})", fontsize=14)
-            fig.tight_layout()
+                if subplot_titles_enabled:
+                    ax.set_title(
+                        _contact_sheet_caption(img_path),
+                        fontsize=style["contact_sheet_title_size"],
+                    )
+            if figure_title_enabled:
+                fig.suptitle(
+                    f"{title} (page {page + 1}/{n_pages})",
+                    fontsize=style["figure_title_size"],
+                )
+            fig.tight_layout(pad=0.2, w_pad=0.08, h_pad=0.12)
             pdf.savefig(fig)
             plt.close(fig)
 
@@ -87,11 +115,18 @@ def _make_pdf_contact_sheet_vector(
     out_pdf: Path,
     title: str,
     max_per_page: int,
-    cell_w_pt: float = 260.0,
-    cell_h_pt: float = 200.0,
-    margin_pt: float = 18.0,
-    pad_pt: float = 8.0,
+    show_titles: bool = True,
+    show_subplot_titles: bool | None = None,
+    show_figure_title: bool | None = None,
+    plot_cfg=None,
+    cell_w_pt: float = 252.0,
+    cell_h_pt: float = 192.0,
+    margin_pt: float = 6.0,
+    pad_pt: float = 2.5,
 ) -> None:
+    import tempfile
+    import matplotlib.pyplot as plt
+
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     try:
         from pypdf import PdfReader, PdfWriter, Transformation
@@ -108,6 +143,18 @@ def _make_pdf_contact_sheet_vector(
     _, _, per_page = _auto_grid(n, max_per_page=max_per_page)
     n_pages = max(1, math.ceil(n / per_page))
     writer = PdfWriter()
+    style = _apply_plot_style(plot_cfg)
+    subplot_titles_enabled = (
+        show_titles if show_subplot_titles is None else bool(show_subplot_titles)
+    )
+    figure_title_enabled = (
+        show_titles if show_figure_title is None else bool(show_figure_title)
+    )
+    title_band_pt = (
+        max(style["contact_sheet_title_size"] * 1.25, 10.0)
+        if subplot_titles_enabled
+        else 0.0
+    )
 
     for page_i in range(n_pages):
         start = page_i * per_page
@@ -130,7 +177,7 @@ def _make_pdf_contact_sheet_vector(
             cell_y0 = margin_pt + row * cell_h_pt
 
             avail_w = cell_w_pt - 2 * pad_pt
-            avail_h = cell_h_pt - 2 * pad_pt
+            avail_h = cell_h_pt - 2 * pad_pt - title_band_pt
             scale = min(avail_w / src_w, avail_h / src_h)
             dx = cell_x0 + pad_pt + (avail_w - src_w * scale) / 2.0
             dy = cell_y0 + pad_pt + (avail_h - src_h * scale) / 2.0
@@ -138,10 +185,66 @@ def _make_pdf_contact_sheet_vector(
             t = Transformation().scale(scale, scale).translate(dx, dy)
             base.merge_transformed_page(src, t)
 
+        if subplot_titles_enabled or figure_title_enabled:
+            with tempfile.TemporaryDirectory(prefix="synthrain_sheet_") as tmpdir:
+                overlay_path = Path(tmpdir) / "overlay.pdf"
+                fig = plt.figure(figsize=(page_w / 72.0, page_h / 72.0))
+                fig.patch.set_alpha(0.0)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.set_axis_off()
+
+                if figure_title_enabled:
+                    fig.suptitle(
+                        f"{title} (page {page_i + 1}/{n_pages})",
+                        fontsize=style["figure_title_size"],
+                        y=0.99,
+                    )
+
+                if subplot_titles_enabled:
+                    for i, pdf_path in enumerate(chunk):
+                        col = i % cols
+                        row_from_top = i // cols
+                        row = (rows - 1) - row_from_top
+                        cell_x0 = margin_pt + col * cell_w_pt
+                        cell_y0 = margin_pt + row * cell_h_pt
+                        x_frac = (cell_x0 + cell_w_pt / 2.0) / page_w
+                        y_frac = (
+                            cell_y0 + cell_h_pt - pad_pt - style["contact_sheet_title_size"] * 0.15
+                        ) / page_h
+                        fig.text(
+                            x_frac,
+                            y_frac,
+                            _contact_sheet_caption(pdf_path),
+                            ha="center",
+                            va="top",
+                            fontsize=style["contact_sheet_title_size"],
+                        )
+
+                fig.savefig(overlay_path, transparent=True, pad_inches=0.0)
+                plt.close(fig)
+
+                overlay = PdfReader(str(overlay_path)).pages[0]
+                base.merge_page(overlay)
+
         writer.add_page(base)
 
     with out_pdf.open("wb") as f:
         writer.write(f)
+
+
+def _contact_sheet_caption(img_path: Path) -> str:
+    img_path = Path(img_path)
+    stem = img_path.stem
+    parent = img_path.parent.name
+    grandparent = (
+        img_path.parent.parent.name if img_path.parent.parent != img_path.parent else ""
+    )
+    if stem == "idw_field":
+        if parent and parent != "run":
+            return parent
+        if grandparent:
+            return grandparent
+    return stem
 
 
 def _parse_int_list(s: str) -> list[int]:
@@ -292,12 +395,18 @@ def _select_mode_items(
     return all_items if scenario_count == 1 else rep_items
 
 
-def _plot_wet_metric_lines(rows: list[dict[str, object]], out_path: Path) -> None:
+def _plot_wet_metric_lines(
+    rows: list[dict[str, object]],
+    out_path: Path,
+    show_titles: bool = True,
+    plot_cfg=None,
+) -> None:
     import matplotlib.pyplot as plt
 
     if not rows:
         return
 
+    style = _apply_plot_style(plot_cfg)
     rows = sorted(rows, key=lambda r: float(r["wet_target"]))
     wet_targets = np.array([float(r["wet_target"]) for r in rows], dtype=float)
     metrics = [
@@ -313,26 +422,35 @@ def _plot_wet_metric_lines(rows: list[dict[str, object]], out_path: Path) -> Non
             [np.nan if r.get(key) is None else float(r[key]) for r in rows], dtype=float
         )
         ax.plot(wet_targets, y, marker="o", linewidth=2)
-        ax.set_title(title)
+        if show_titles:
+            ax.set_title(title)
         ax.set_xlabel("wet_target")
         ax.set_ylabel(key)
         ax.grid(alpha=0.3)
 
-    fig.suptitle("Wet Sweep Metrics", fontsize=14)
-    fig.tight_layout()
+    if show_titles:
+        fig.suptitle("Wet Sweep Metrics", fontsize=style["figure_title_size"])
+    fig.tight_layout(pad=0.2, w_pad=0.08, h_pad=0.12)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=220, bbox_inches="tight")
+    fig.savefig(out_path.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
 
 
 def _plot_idw_metric_heatmap(
-    rows: list[dict[str, object]], metric_key: str, title: str, out_path: Path
+    rows: list[dict[str, object]],
+    metric_key: str,
+    title: str,
+    out_path: Path,
+    show_titles: bool = True,
+    plot_cfg=None,
 ) -> None:
     import matplotlib.pyplot as plt
 
     if not rows:
         return
 
+    style = _apply_plot_style(plot_cfg)
     powers = sorted({float(r["idw_power"]) for r in rows})
     nears = sorted({int(r["idw_near"]) for r in rows})
     dists = sorted({float(r["idw_dist_m"]) for r in rows})
@@ -355,7 +473,8 @@ def _plot_idw_metric_heatmap(
             mat[i, j] = np.nan if value is None else float(value)
 
         im = ax.imshow(mat, aspect="auto", cmap="viridis")
-        ax.set_title(f"p={_tagify_float(power)}")
+        if show_titles:
+            ax.set_title(f"p={_tagify_float(power)}")
         ax.set_xticks(range(len(dists)))
         ax.set_xticklabels([_tagify_float(d) for d in dists], rotation=45, ha="right")
         ax.set_yticks(range(len(nears)))
@@ -366,12 +485,23 @@ def _plot_idw_metric_heatmap(
         for i in range(len(nears)):
             for j in range(len(dists)):
                 if np.isfinite(mat[i, j]):
-                    ax.text(j, i, f"{mat[i, j]:.2f}", ha="center", va="center", fontsize=8)
+                    ax.text(
+                        j,
+                        i,
+                        f"{mat[i, j]:.2f}",
+                        ha="center",
+                        va="center",
+                        fontsize=max(
+                            8.0 * float(getattr(plot_cfg, "font_scale", 1.0)),
+                            1.0,
+                        ),
+                    )
 
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    fig.suptitle(title, fontsize=14)
-    fig.tight_layout()
+    if show_titles:
+        fig.suptitle(title, fontsize=style["figure_title_size"])
+    fig.tight_layout(pad=0.2, w_pad=0.08, h_pad=0.12)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
@@ -404,14 +534,18 @@ def _build_manifest(
 def build_wet_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-config", default="configs/config.ini", help="Base INI file")
-    ap.add_argument("--out-root", default="outputs_wet_sweep", help="Root folder for all runs")
+    ap.add_argument(
+        "--out-root", default="outputs_wet_sweep", help="Root folder for all runs"
+    )
     ap.add_argument(
         "--wet-targets",
         default="",
         help="Comma-separated wet_target values. If empty, uses [sweep] wet_targets from base config.",
     )
     ap.add_argument("--seed", type=int, default=None, help="Override [io] seed")
-    ap.add_argument("--n-sites", type=int, default=None, help="Override [network] n_sites")
+    ap.add_argument(
+        "--n-sites", type=int, default=None, help="Override [network] n_sites"
+    )
     ap.add_argument("--debug", action="store_true")
     ap.add_argument("--idw-png-dirname", default="_idw_png", help="Deprecated; ignored")
     ap.add_argument("--idw-pdf-dirname", default="_idw_pdf", help="Deprecated; ignored")
@@ -439,10 +573,18 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
     if getattr(args, "keep_temp_configs", False):
         log_warn("WET-SWEEP", "--keep-temp-configs is deprecated and ignored")
     if args.idw_png_dirname != "_idw_png" or args.idw_pdf_dirname != "_idw_pdf":
-        log_warn("WET-SWEEP", "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored")
+        log_warn(
+            "WET-SWEEP",
+            "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored",
+        )
 
     base_cfg = load_scenario_config(base_config)
-    wet_targets = _parse_float_list(args.wet_targets) if args.wet_targets.strip() else list(base_cfg.sweep.wet_targets)
+    show_titles = base_cfg.plot.show_titles
+    wet_targets = (
+        _parse_float_list(args.wet_targets)
+        if args.wet_targets.strip()
+        else list(base_cfg.sweep.wet_targets)
+    )
     if not wet_targets:
         log_error("WET-SWEEP", "no wet_targets provided and none found in config")
         return 2
@@ -474,7 +616,11 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
             ),
             network=replace(
                 base_cfg.network,
-                n_sites=args.n_sites if args.n_sites is not None else base_cfg.network.n_sites,
+                n_sites=(
+                    args.n_sites
+                    if args.n_sites is not None
+                    else base_cfg.network.n_sites
+                ),
             ),
             wet=replace(base_cfg.wet, wet_target=wt),
             plot=replace(base_cfg.plot, title_name=tag),
@@ -491,7 +637,9 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
             {"sweep_type": "wet", "scenario_tag": tag, "run_tag": "run"}
         )
         comparison_row = dict(row)
-        comparison_row["run_dir"] = str(run_out.resolve().relative_to(out_root.resolve()))
+        comparison_row["run_dir"] = str(
+            run_out.resolve().relative_to(out_root.resolve())
+        )
         comparison_row["out_dir"] = comparison_row["run_dir"]
         comparison_rows.append(comparison_row)
 
@@ -516,6 +664,10 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
             out_pdf=global_reports / args.png_sheet_name,
             title="Wet Sweep - IDW Field",
             max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=True,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
         )
     if not args.skip_vector_sheet and pdf_paths:
         _make_pdf_contact_sheet_vector(
@@ -523,9 +675,18 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
             out_pdf=global_reports / args.vector_sheet_name,
             title="Wet Sweep - IDW Field",
             max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=True,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
         )
     if comparison_rows:
-        _plot_wet_metric_lines(comparison_rows, global_reports / "wet_sweep_metrics.png")
+        _plot_wet_metric_lines(
+            comparison_rows,
+            global_reports / "wet_sweep_metrics.png",
+            show_titles=show_titles,
+            plot_cfg=base_cfg.plot,
+        )
 
     manifest = _build_manifest(
         "wet",
@@ -549,26 +710,44 @@ def run_wet_sweep(args: argparse.Namespace) -> int:
 def build_idw_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-config", default="configs/config.ini", help="Base INI file")
-    ap.add_argument("--out-root", default="outputs_sweep", help="Root folder for all runs")
-    ap.add_argument("--debug", action="store_true", help="Enable debug mode in run_scenario")
-    ap.add_argument("--powers", default="1,2,3", help="Comma-separated idw_power values")
+    ap.add_argument(
+        "--out-root", default="outputs_sweep", help="Root folder for all runs"
+    )
+    ap.add_argument(
+        "--debug", action="store_true", help="Enable debug mode in run_scenario"
+    )
+    ap.add_argument(
+        "--powers", default="1,2,3", help="Comma-separated idw_power values"
+    )
     ap.add_argument("--nears", default="4,8,12", help="Comma-separated idw_near values")
     ap.add_argument(
         "--dists",
         default="10000,30000,60000",
         help="Comma-separated idw_dist_m values; use 0 for unlimited",
     )
-    ap.add_argument("--n-sites-list", default="50,75,100", help="Comma-separated n_sites values")
+    ap.add_argument(
+        "--n-sites-list", default="50,75,100", help="Comma-separated n_sites values"
+    )
     ap.add_argument("--seeds", default="0,1,2", help="Comma-separated seed values")
-    ap.add_argument("--wet-targets", default="0.1,0.33,0.5", help="Comma-separated wet_target values")
+    ap.add_argument(
+        "--wet-targets",
+        default="0.1,0.33,0.5",
+        help="Comma-separated wet_target values",
+    )
     ap.add_argument("--idw-pdf-dirname", default="_idw_pdf", help="Deprecated; ignored")
     ap.add_argument("--idw-png-dirname", default="_idw_png", help="Deprecated; ignored")
     ap.add_argument("--pdf-name", default="idw_sweep_contact_sheet.pdf")
     ap.add_argument("--vector-merge-name", default="idw_fields_merged_vector.pdf")
-    ap.add_argument("--global-vector-merge-name", default="ALL_SCENARIOS_idw_fields_merged_vector.pdf")
+    ap.add_argument(
+        "--global-vector-merge-name",
+        default="ALL_SCENARIOS_idw_fields_merged_vector.pdf",
+    )
     ap.add_argument("--skip-vector-merge", action="store_true")
     ap.add_argument("--vector-sheet-name", default="idw_sweep_contact_sheet_vector.pdf")
-    ap.add_argument("--global-vector-sheet-name", default="ALL_SCENARIOS_idw_fields_contact_sheet_vector.pdf")
+    ap.add_argument(
+        "--global-vector-sheet-name",
+        default="ALL_SCENARIOS_idw_fields_contact_sheet_vector.pdf",
+    )
     ap.add_argument("--skip-vector-sheet", action="store_true")
     ap.add_argument("--summary-name", default="summary.csv")
     ap.add_argument("--keep-temp-configs", action="store_true")
@@ -602,9 +781,13 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
     if getattr(args, "keep_temp_configs", False):
         log_warn("IDW-SWEEP", "--keep-temp-configs is deprecated and ignored")
     if args.idw_png_dirname != "_idw_png" or args.idw_pdf_dirname != "_idw_pdf":
-        log_warn("IDW-SWEEP", "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored")
+        log_warn(
+            "IDW-SWEEP",
+            "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored",
+        )
 
     base_cfg = load_scenario_config(base_config)
+    show_titles = base_cfg.plot.show_titles
     out_root = Path(args.out_root).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     log_info("IDW-SWEEP", f"output root: {out_root}")
@@ -718,15 +901,26 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
                 out_pdf=scenario_reports / args.pdf_name,
                 title=f"IDW Sweep - {scen_tag}",
                 max_per_page=args.max_per_page,
+                show_titles=show_titles,
+                show_subplot_titles=True,
+                show_figure_title=show_titles,
+                plot_cfg=base_cfg.plot,
             )
         if not args.skip_vector_merge and pdf_paths:
-            _merge_pdfs(sorted(pdf_paths, key=lambda p: p.name), scenario_reports / args.vector_merge_name)
+            _merge_pdfs(
+                sorted(pdf_paths, key=lambda p: p.name),
+                scenario_reports / args.vector_merge_name,
+            )
         if not args.skip_vector_sheet and pdf_paths:
             _make_pdf_contact_sheet_vector(
                 pdfs=sorted(pdf_paths, key=lambda p: p.name),
                 out_pdf=scenario_reports / args.vector_sheet_name,
                 title=f"IDW Sweep - {scen_tag}",
                 max_per_page=args.max_per_page,
+                show_titles=show_titles,
+                show_subplot_titles=True,
+                show_figure_title=show_titles,
+                plot_cfg=base_cfg.plot,
             )
         if ranked_rows:
             _plot_idw_metric_heatmap(
@@ -734,19 +928,25 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
                 metric_key="rmse",
                 title=f"{scen_tag} - RMSE by IDW Parameters",
                 out_path=scenario_reports / "metric_heatmap_rmse.png",
+                show_titles=show_titles,
+                plot_cfg=base_cfg.plot,
             )
             _plot_idw_metric_heatmap(
                 ranked_rows,
                 metric_key="valid_pixel_fraction",
                 title=f"{scen_tag} - Valid Pixel Fraction by IDW Parameters",
                 out_path=scenario_reports / "metric_heatmap_valid_pixel_fraction.png",
+                show_titles=show_titles,
+                plot_cfg=base_cfg.plot,
             )
 
     leaderboard_rows = _compact_leaderboard_rows(sorted(best_rows, key=_rmse_key))
     _write_rows_csv(out_root / "leaderboard.csv", leaderboard_rows)
     _write_rows_csv(out_root / args.summary_name, leaderboard_rows)
     _write_rows_csv(global_reports / "all_runs.csv", sorted(all_rows, key=_rmse_key))
-    _write_rows_csv(global_reports / "best_per_scenario.csv", sorted(best_rows, key=_rmse_key))
+    _write_rows_csv(
+        global_reports / "best_per_scenario.csv", sorted(best_rows, key=_rmse_key)
+    )
 
     png_for_global = _select_mode_items(
         all_items=global_all_pngs,
@@ -767,11 +967,16 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             if args.global_png_sheet_mode == "all"
             else "best_per_scenario_contact_sheet.pdf"
         )
+        keep_subplot_titles = global_png_name == "best_per_scenario_contact_sheet.pdf"
         _make_pdf_contact_sheet(
             images=sorted(png_for_global, key=lambda p: p.name),
             out_pdf=global_reports / global_png_name,
             title="IDW Sweep - Global Representative Fields",
             max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=keep_subplot_titles or show_titles,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
         )
     if not args.skip_vector_sheet and vec_for_global:
         global_vec_name = (
@@ -784,6 +989,10 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             out_pdf=global_reports / global_vec_name,
             title="IDW Sweep - Global Representative Fields",
             max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=show_titles,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
         )
     if not args.skip_vector_merge and global_all_pdfs:
         _merge_pdfs(

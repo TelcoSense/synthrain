@@ -8,7 +8,7 @@ import numpy as np
 from synthrain.run_logging import format_path, log_info
 from synthrain.scenario import ScenarioResult
 from synthrain.csv_export import CsvSpecMinimal, export_synth_minimal_csv
-from synthrain.render import save_field_image, save_links_image
+from synthrain.render import apply_plot_style, save_field_image, save_links_image
 
 
 def _fault_counts(links_obs) -> dict[str, int]:
@@ -36,6 +36,7 @@ def write_scenario_outputs(result: ScenarioResult) -> dict[str, object]:
     out_dir = Path(result.config.io.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     log_info("SCENARIO", f"writing outputs: {format_path(out_dir)}")
+    apply_plot_style(result.config.plot)
 
     lon_g = result.grid["lon_g"]
     lat_g = result.grid["lat_g"]
@@ -49,34 +50,37 @@ def write_scenario_outputs(result: ScenarioResult) -> dict[str, object]:
         if np.isfinite(z_idw).any()
         else float(np.nanmax(z_true))
     )
+    show_titles = result.config.plot.show_titles
 
-    save_field_image(
-        str(out_dir / "true_field"),
-        lon_g,
-        lat_g,
-        z_true,
-        title="True rainfall field (mm/h)",
-        vmin=vmin,
-        vmax=vmax,
-        xlabel="lon",
-        ylabel="lat",
-        min_rain=result.config.rain.min_rain,
-        suffix="png",
-    )
-    save_links_image(
-        str(out_dir / "links"),
-        result.links_obs,
-        bbox=result.bbox_ll,
-        title="Link centers (wet/dry/unavailable)",
-        suffix="png",
-    )
+    for suffix in ("png", "pdf"):
+        save_field_image(
+            str(out_dir / "true_field"),
+            lon_g,
+            lat_g,
+            z_true,
+            title="True rainfall field (mm/h)" if show_titles else "",
+            vmin=vmin,
+            vmax=vmax,
+            xlabel="lon",
+            ylabel="lat",
+            min_rain=result.config.rain.min_rain,
+            suffix=suffix,
+        )
+    for suffix in ("png", "pdf"):
+        save_links_image(
+            str(out_dir / "links"),
+            result.links_obs,
+            bbox=result.bbox_ll,
+            title="Link centers (wet/dry/unavailable)" if show_titles else "",
+            suffix=suffix,
+        )
     for suffix in ("pdf", "png"):
         save_field_image(
             str(out_dir / "idw_field"),
             lon_g,
             lat_g,
             z_idw,
-            title=result.config.plot.title_name,
+            title=result.config.plot.title_name if show_titles else "",
             vmin=vmin,
             vmax=vmax,
             links=result.links_obs,
@@ -86,17 +90,18 @@ def write_scenario_outputs(result: ScenarioResult) -> dict[str, object]:
             min_rain=result.config.rain.min_rain,
             suffix=suffix,
         )
-    save_field_image(
-        str(out_dir / "diff"),
-        lon_g,
-        lat_g,
-        diff,
-        title="IDW - True (mm/h)",
-        xlabel="lon",
-        ylabel="lat",
-        min_rain=result.config.rain.min_rain,
-        suffix="png",
-    )
+    for suffix in ("png", "pdf"):
+        save_field_image(
+            str(out_dir / "diff"),
+            lon_g,
+            lat_g,
+            diff,
+            title="IDW - True (mm/h)" if show_titles else "",
+            xlabel="lon",
+            ylabel="lat",
+            min_rain=result.config.rain.min_rain,
+            suffix=suffix,
+        )
 
     if result.config.csv.export_csv:
         export_synth_minimal_csv(
