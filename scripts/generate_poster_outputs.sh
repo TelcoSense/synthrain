@@ -30,10 +30,10 @@ echo "[2/4] Generating wet sweep outputs..."
   --n-sites 50 \
   --no-log-to-file
 
-echo "[3/4] Generating IDW sweep outputs for 3x4 poster grid..."
+echo "[3/4] Generating IDW sweep outputs for 2x6 poster grid..."
 "${PYTHON_BIN}" run_idw_sweep.py \
   --base-config configs/config.ini \
-  --out-root poster_outputs/03_idw_sweep_3x4 \
+  --out-root poster_outputs/03_idw_sweep_2x6 \
   --powers 1,2.5,4 \
   --nears 6,12 \
   --dists 10000,30000 \
@@ -41,7 +41,9 @@ echo "[3/4] Generating IDW sweep outputs for 3x4 poster grid..."
   --seeds 0 \
   --wet-targets 0.2 \
   --no-log-to-file \
-  --max-per-page 12
+  --max-per-page 12 \
+  --sheet-rows 2 \
+  --sheet-cols 6
 
 echo "[4/4] Generating fault-case scenario outputs..."
 "${PYTHON_BIN}" run_scenario.py \

@@ -36,6 +36,22 @@ def _auto_grid(n: int, max_per_page: int = 25) -> tuple[int, int, int]:
     return rows, cols, rows * cols
 
 
+def _sheet_grid(
+    n: int,
+    max_per_page: int = 25,
+    sheet_rows: int | None = None,
+    sheet_cols: int | None = None,
+) -> tuple[int, int, int]:
+    if sheet_rows is None and sheet_cols is None:
+        return _auto_grid(n, max_per_page=max_per_page)
+    if sheet_rows is None or sheet_cols is None:
+        raise ValueError("--sheet-rows and --sheet-cols must be used together")
+    if sheet_rows <= 0 or sheet_cols <= 0:
+        raise ValueError("--sheet-rows and --sheet-cols must be positive")
+    per_page = sheet_rows * sheet_cols
+    return sheet_rows, sheet_cols, per_page
+
+
 def _make_pdf_contact_sheet(
     images: list[Path],
     out_pdf: Path,
@@ -45,6 +61,8 @@ def _make_pdf_contact_sheet(
     show_subplot_titles: bool | None = None,
     show_figure_title: bool | None = None,
     plot_cfg=None,
+    sheet_rows: int | None = None,
+    sheet_cols: int | None = None,
 ) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
@@ -56,7 +74,12 @@ def _make_pdf_contact_sheet(
 
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     n = len(images)
-    _, _, per_page = _auto_grid(n, max_per_page=max_per_page)
+    _, _, per_page = _sheet_grid(
+        n,
+        max_per_page=max_per_page,
+        sheet_rows=sheet_rows,
+        sheet_cols=sheet_cols,
+    )
     n_pages = max(1, math.ceil(n / per_page))
     style = _apply_plot_style(plot_cfg)
     subplot_titles_enabled = (
@@ -70,7 +93,12 @@ def _make_pdf_contact_sheet(
         for page in range(n_pages):
             start = page * per_page
             chunk = images[start : start + per_page]
-            rows, cols, _ = _auto_grid(len(chunk), max_per_page=max_per_page)
+            rows, cols, _ = _sheet_grid(
+                len(chunk),
+                max_per_page=max_per_page,
+                sheet_rows=sheet_rows,
+                sheet_cols=sheet_cols,
+            )
             fig = plt.figure(figsize=(cols * 4.0, rows * 3.0))
             for i, img_path in enumerate(chunk):
                 ax = fig.add_subplot(rows, cols, i + 1)
@@ -123,6 +151,8 @@ def _make_pdf_contact_sheet_vector(
     cell_h_pt: float = 192.0,
     margin_pt: float = 6.0,
     pad_pt: float = 2.5,
+    sheet_rows: int | None = None,
+    sheet_cols: int | None = None,
 ) -> None:
     import tempfile
     import matplotlib.pyplot as plt
@@ -140,7 +170,12 @@ def _make_pdf_contact_sheet_vector(
         return
 
     n = len(pdfs)
-    _, _, per_page = _auto_grid(n, max_per_page=max_per_page)
+    _, _, per_page = _sheet_grid(
+        n,
+        max_per_page=max_per_page,
+        sheet_rows=sheet_rows,
+        sheet_cols=sheet_cols,
+    )
     n_pages = max(1, math.ceil(n / per_page))
     writer = PdfWriter()
     style = _apply_plot_style(plot_cfg)
@@ -159,7 +194,12 @@ def _make_pdf_contact_sheet_vector(
     for page_i in range(n_pages):
         start = page_i * per_page
         chunk = pdfs[start : start + per_page]
-        rows, cols, _ = _auto_grid(len(chunk), max_per_page=max_per_page)
+        rows, cols, _ = _sheet_grid(
+            len(chunk),
+            max_per_page=max_per_page,
+            sheet_rows=sheet_rows,
+            sheet_cols=sheet_cols,
+        )
 
         page_w = margin_pt * 2 + cols * cell_w_pt
         page_h = margin_pt * 2 + rows * cell_h_pt
@@ -753,6 +793,8 @@ def build_idw_parser() -> argparse.ArgumentParser:
     ap.add_argument("--keep-temp-configs", action="store_true")
     ap.add_argument("--skip-pdf", action="store_true", help="Skip PNG contact sheets")
     ap.add_argument("--max-per-page", type=int, default=25)
+    ap.add_argument("--sheet-rows", type=int, default=None)
+    ap.add_argument("--sheet-cols", type=int, default=None)
     ap.add_argument(
         "--global-vector-sheet-mode",
         choices=["auto", "rep", "all"],
@@ -785,6 +827,12 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             "IDW-SWEEP",
             "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored",
         )
+    if (args.sheet_rows is None) != (args.sheet_cols is None):
+        log_error("IDW-SWEEP", "--sheet-rows and --sheet-cols must be used together")
+        return 2
+    if args.sheet_rows is not None and (args.sheet_rows <= 0 or args.sheet_cols <= 0):
+        log_error("IDW-SWEEP", "--sheet-rows and --sheet-cols must be positive")
+        return 2
 
     base_cfg = load_scenario_config(base_config)
     show_titles = base_cfg.plot.show_titles
@@ -905,6 +953,8 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
                 show_subplot_titles=True,
                 show_figure_title=show_titles,
                 plot_cfg=base_cfg.plot,
+                sheet_rows=args.sheet_rows,
+                sheet_cols=args.sheet_cols,
             )
         if not args.skip_vector_merge and pdf_paths:
             _merge_pdfs(
@@ -921,6 +971,8 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
                 show_subplot_titles=True,
                 show_figure_title=show_titles,
                 plot_cfg=base_cfg.plot,
+                sheet_rows=args.sheet_rows,
+                sheet_cols=args.sheet_cols,
             )
         if ranked_rows:
             _plot_idw_metric_heatmap(
@@ -977,6 +1029,8 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             show_subplot_titles=keep_subplot_titles or show_titles,
             show_figure_title=show_titles,
             plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
         )
     if not args.skip_vector_sheet and vec_for_global:
         global_vec_name = (
@@ -993,6 +1047,8 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             show_subplot_titles=show_titles,
             show_figure_title=show_titles,
             plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
         )
     if not args.skip_vector_merge and global_all_pdfs:
         _merge_pdfs(
