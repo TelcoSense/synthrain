@@ -1,4 +1,4 @@
-# telcorain_synth
+# synthrain
 
 Lightweight synthetic testbed for TelcoRain-like rainfall interpolation.
 
@@ -25,6 +25,8 @@ data or database access.
 
 ## Repository Layout
 
+- `USER_GUIDE.md`
+  - Step-by-step guide for creating experiments and interpreting outputs
 - `run_scenario.py`
   - Main single-scenario CLI
 - `run_scenarios.py`
@@ -118,10 +120,39 @@ IDW sweep:
 python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep
 ```
 
+Preset IDW sweep:
+
+```bash
+python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep --preset quick
+python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep --preset poster
+python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep --preset robust
+```
+
 Focused IDW sweep:
 
 ```bash
 python run_idw_sweep.py --base-config configs/config.ini --powers 1,2,3 --nears 4,8,12 --dists 10000,30000 --n-sites-list 50 --seeds 0 --wet-targets 0.1
+```
+
+IDW sweeps can rank best runs by different criteria:
+
+```bash
+python run_idw_sweep.py --base-config configs/config.ini --ranking-metric balanced_score
+```
+
+Available ranking metrics are:
+
+- `rmse`
+- `balanced_score`
+- `detection_score`
+- `valid_pixel_fraction`
+
+`balanced_score` combines normalized RMSE, MAE, invalid-pixel penalty, wet miss rate, dry false rain rate, and absolute bias. Lower is better. It is useful when you want a parameter set that is not only close in RMSE, but also less brittle for rain/no-rain detection.
+
+To rebuild reports/contact sheets from existing run folders without rerunning scenarios:
+
+```bash
+python run_idw_sweep.py --base-config configs/config.ini --out-root outputs_idw_sweep --rerender-only --sheet-rows 2 --sheet-cols 6
 ```
 
 Each sweep writes metric tables using values such as:
@@ -181,6 +212,8 @@ Notes:
 - IDW sweep writes `leaderboard.csv` because it compares multiple parameter combinations inside each scenario.
 - `best_run.json` is only used for IDW sweep scenarios.
 - IDW sweeps use metrics to choose representative runs for global reports instead of taking the first run arbitrarily.
+- IDW scenario summaries include `rank_rmse`, `rank_balanced`, `rank_detection`, `balanced_score`, and `detection_score`.
+- `parameter_robustness.csv` aggregates each IDW parameter tuple across scenarios/seeds using mean, standard deviation, best, and worst metric values.
 
 ## Config
 

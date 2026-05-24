@@ -5,12 +5,62 @@ import csv
 import itertools
 import json
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
 
 from synthrain.run_logging import log_error, log_info, log_warn
+
+
+DEFAULT_IDW_SWEEP = {
+    "powers": "1,2,3",
+    "nears": "4,8,12",
+    "dists": "10000,30000,60000",
+    "n_sites_list": "50,75,100",
+    "seeds": "0,1,2",
+    "wet_targets": "0.1,0.33,0.5",
+}
+
+IDW_SWEEP_PRESETS = {
+    "quick": {
+        "powers": "1,2,3",
+        "nears": "4,8",
+        "dists": "10000,30000",
+        "n_sites_list": "50",
+        "seeds": "0",
+        "wet_targets": "0.2",
+    },
+    "poster": {
+        "powers": "1,2.5,4",
+        "nears": "6,12",
+        "dists": "10000,30000",
+        "n_sites_list": "50",
+        "seeds": "0",
+        "wet_targets": "0.2",
+        "max_per_page": 12,
+        "sheet_rows": 2,
+        "sheet_cols": 6,
+    },
+    "robust": {
+        "powers": "1,1.5,2,2.5,3,4",
+        "nears": "4,6,8,12,16",
+        "dists": "5000,10000,20000,30000,0",
+        "n_sites_list": "40,50,75",
+        "seeds": "0,1,2,3,4",
+        "wet_targets": "0.1,0.2,0.35,0.5",
+    },
+}
+
+
+@dataclass
+class IdwReportState:
+    all_rows: list[dict[str, object]]
+    best_rows: list[dict[str, object]]
+    global_all_pngs: list[Path]
+    global_all_pdfs: list[Path]
+    global_rep_pngs: list[Path]
+    global_rep_pdfs: list[Path]
 
 
 def _tagify_float(x: float) -> str:
@@ -295,6 +345,43 @@ def _parse_float_list(s: str) -> list[float]:
     return [float(x.strip()) for x in s.split(",") if x.strip()]
 
 
+def _idw_arg(args: argparse.Namespace, name: str) -> object:
+    value = getattr(args, name)
+    if value is not None:
+        return value
+    preset_name = getattr(args, "preset", "") or ""
+    if preset_name:
+        return IDW_SWEEP_PRESETS[preset_name].get(name, DEFAULT_IDW_SWEEP.get(name))
+    return DEFAULT_IDW_SWEEP.get(name)
+
+
+def _normalize_idw_report_args(args: argparse.Namespace) -> None:
+    args.max_per_page = int(_idw_arg(args, "max_per_page") or 25)
+    if args.sheet_rows is None:
+        args.sheet_rows = _idw_arg(args, "sheet_rows")
+    if args.sheet_cols is None:
+        args.sheet_cols = _idw_arg(args, "sheet_cols")
+    if (args.sheet_rows is None) != (args.sheet_cols is None):
+        raise ValueError("--sheet-rows and --sheet-cols must be used together")
+    if args.sheet_rows is not None:
+        args.sheet_rows = int(args.sheet_rows)
+        args.sheet_cols = int(args.sheet_cols)
+        if args.sheet_rows <= 0 or args.sheet_cols <= 0:
+            raise ValueError("--sheet-rows and --sheet-cols must be positive")
+
+
+def _parse_idw_grid_args(
+    args: argparse.Namespace,
+) -> tuple[list[float], list[int], list[float], list[int], list[int], list[float]]:
+    powers = _parse_float_list(str(_idw_arg(args, "powers")))
+    nears = _parse_int_list(str(_idw_arg(args, "nears")))
+    dists = _parse_float_list(str(_idw_arg(args, "dists")))
+    n_sites_list = _parse_int_list(str(_idw_arg(args, "n_sites_list")))
+    seeds = _parse_int_list(str(_idw_arg(args, "seeds")))
+    wet_targets = _parse_float_list(str(_idw_arg(args, "wet_targets")))
+    return powers, nears, dists, n_sites_list, seeds, wet_targets
+
+
 def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
@@ -310,6 +397,13 @@ def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def _read_rows_csv(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    with path.open("r", newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
 def _write_json(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -317,6 +411,96 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 
 def _bool_debug(base_cfg, force_debug: bool) -> bool:
     return True if force_debug else base_cfg.io.debug
+
+
+def _finite_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
+def _metric_values(rows: list[dict[str, object]], key: str) -> list[float]:
+    return [v for row in rows if (v := _finite_float(row.get(key))) is not None]
+
+
+def _normalize_low(value: object, values: list[float]) -> float | None:
+    f = _finite_float(value)
+    if f is None:
+        return None
+    if not values:
+        return None
+    lo = min(values)
+    hi = max(values)
+    if math.isclose(lo, hi):
+        return 0.0
+    return (f - lo) / (hi - lo)
+
+
+def _add_score_columns(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not rows:
+        return []
+
+    rmse_values = _metric_values(rows, "rmse")
+    mae_values = _metric_values(rows, "mae")
+    bias_values = [abs(v) for row in rows if (v := _finite_float(row.get("bias"))) is not None]
+
+    scored: list[dict[str, object]] = []
+    for row in rows:
+        enriched = dict(row)
+        rmse_n = _normalize_low(row.get("rmse"), rmse_values)
+        mae_n = _normalize_low(row.get("mae"), mae_values)
+        bias = _finite_float(row.get("bias"))
+        bias_n = _normalize_low(abs(bias) if bias is not None else None, bias_values)
+        invalid = 1.0 - (_finite_float(row.get("valid_pixel_fraction")) or 0.0)
+        wet_miss = _finite_float(row.get("wet_miss_rate"))
+        dry_false = _finite_float(row.get("dry_false_rain_rate"))
+        wet_miss_penalty = 0.0 if wet_miss is None else wet_miss
+        dry_false_penalty = 0.0 if dry_false is None else dry_false
+
+        parts = [
+            (0.45, rmse_n),
+            (0.20, mae_n),
+            (0.15, invalid),
+            (0.10, wet_miss_penalty),
+            (0.05, dry_false_penalty),
+            (0.05, bias_n),
+        ]
+        weighted = [(w, v) for w, v in parts if v is not None]
+        enriched["balanced_score"] = (
+            sum(w * float(v) for w, v in weighted) / sum(w for w, _ in weighted)
+            if weighted
+            else None
+        )
+        enriched["detection_score"] = wet_miss_penalty + dry_false_penalty + invalid
+        scored.append(enriched)
+    return scored
+
+
+def _rank_sort_key(row: dict[str, object], metric: str) -> tuple[int, float]:
+    if metric == "valid_pixel_fraction":
+        value = _finite_float(row.get(metric))
+        return (1, float("inf")) if value is None else (0, -value)
+    value = _finite_float(row.get(metric))
+    return (1, float("inf")) if value is None else (0, value)
+
+
+def _add_rank_columns(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    enriched = [dict(row) for row in rows]
+    by_id = {id(row): row for row in enriched}
+    for col, metric in [
+        ("rank_rmse", "rmse"),
+        ("rank_balanced", "balanced_score"),
+        ("rank_detection", "detection_score"),
+    ]:
+        for rank, row in enumerate(sorted(enriched, key=lambda r: _rank_sort_key(r, metric)), start=1):
+            by_id[id(row)][col] = rank
+    return enriched
 
 
 def _rmse_key(row: dict[str, object]) -> tuple[int, float]:
@@ -332,13 +516,20 @@ def _rmse_key(row: dict[str, object]) -> tuple[int, float]:
     return (0, f)
 
 
-def _rank_rows(rows: list[dict[str, object]], root: Path) -> list[dict[str, object]]:
+def _rank_rows(
+    rows: list[dict[str, object]], root: Path, ranking_metric: str = "rmse"
+) -> list[dict[str, object]]:
     ranked: list[dict[str, object]] = []
-    for rank, row in enumerate(sorted(rows, key=_rmse_key), start=1):
+    scored_rows = _add_rank_columns(_add_score_columns(rows))
+    for rank, row in enumerate(
+        sorted(scored_rows, key=lambda r: _rank_sort_key(r, ranking_metric)), start=1
+    ):
         out_dir = Path(str(row["out_dir"]))
+        out_path = out_dir if out_dir.is_absolute() else root / out_dir
         enriched = dict(row)
-        enriched["run_dir"] = str(out_dir.resolve().relative_to(root.resolve()))
+        enriched["run_dir"] = str(out_path.resolve().relative_to(root.resolve()))
         enriched["rank"] = rank
+        enriched["ranking_metric"] = ranking_metric
         enriched["is_best"] = rank == 1
         enriched["out_dir"] = enriched["run_dir"]
         ranked.append(enriched)
@@ -350,7 +541,13 @@ def _compact_leaderboard_rows(rows: list[dict[str, object]]) -> list[dict[str, o
         "scenario_tag",
         "run_tag",
         "rank",
+        "rank_rmse",
+        "rank_balanced",
+        "rank_detection",
         "is_best",
+        "ranking_metric",
+        "balanced_score",
+        "detection_score",
         "rmse",
         "mae",
         "bias",
@@ -397,7 +594,10 @@ def _best_run_payload(row: dict[str, object]) -> dict[str, object]:
         "scenario_tag": row.get("scenario_tag"),
         "run_tag": row.get("run_tag"),
         "rank": row.get("rank"),
+        "ranking_metric": row.get("ranking_metric"),
         "metrics": {
+            "balanced_score": row.get("balanced_score"),
+            "detection_score": row.get("detection_score"),
             "rmse": row.get("rmse"),
             "mae": row.get("mae"),
             "bias": row.get("bias"),
@@ -433,6 +633,71 @@ def _select_mode_items(
     if mode == "all":
         return all_items
     return all_items if scenario_count == 1 else rep_items
+
+
+def _mean_std(values: list[float]) -> tuple[float | None, float | None]:
+    if not values:
+        return None, None
+    arr = np.array(values, dtype=float)
+    mean = float(np.mean(arr))
+    std = float(np.std(arr, ddof=1)) if arr.size > 1 else 0.0
+    return mean, std
+
+
+def _build_parameter_robustness_rows(
+    rows: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    grouped: dict[tuple[float, int, float], list[dict[str, object]]] = {}
+    for row in rows:
+        power = _finite_float(row.get("idw_power"))
+        near = _finite_float(row.get("idw_near"))
+        dist = _finite_float(row.get("idw_dist_m"))
+        if power is None or near is None or dist is None:
+            continue
+        grouped.setdefault((power, int(near), dist), []).append(row)
+
+    out: list[dict[str, object]] = []
+    for (power, near, dist), group in grouped.items():
+        record: dict[str, object] = {
+            "idw_power": power,
+            "idw_near": near,
+            "idw_dist_m": dist,
+            "n_runs": len(group),
+            "n_scenarios": len({str(r.get("scenario_tag", "")) for r in group}),
+        }
+        higher_is_better = {"valid_pixel_fraction", "wet_hit_rate"}
+        for metric in [
+            "rmse",
+            "mae",
+            "balanced_score",
+            "detection_score",
+            "valid_pixel_fraction",
+            "wet_hit_rate",
+            "wet_miss_rate",
+            "dry_false_rain_rate",
+        ]:
+            values = _metric_values(group, metric)
+            mean, std = _mean_std(values)
+            record[f"{metric}_mean"] = mean
+            record[f"{metric}_std"] = std
+            if metric in higher_is_better:
+                record[f"{metric}_best"] = max(values) if values else None
+                record[f"{metric}_worst"] = min(values) if values else None
+            else:
+                record[f"{metric}_best"] = min(values) if values else None
+                record[f"{metric}_worst"] = max(values) if values else None
+        out.append(record)
+
+    out = sorted(
+        out,
+        key=lambda r: (
+            _rank_sort_key(r, "balanced_score_mean"),
+            _rank_sort_key(r, "rmse_mean"),
+        ),
+    )
+    for rank, row in enumerate(out, start=1):
+        row["rank_robust"] = rank
+    return out
 
 
 def _plot_wet_metric_lines(
@@ -545,6 +810,240 @@ def _plot_idw_metric_heatmap(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=220, bbox_inches="tight")
     plt.close(fig)
+
+
+def _idw_paths_from_rows(rows: list[dict[str, object]], out_root: Path) -> tuple[list[Path], list[Path]]:
+    png_paths: list[Path] = []
+    pdf_paths: list[Path] = []
+    for row in rows:
+        run_dir = row.get("run_dir") or row.get("out_dir")
+        if not run_dir:
+            continue
+        run_path = out_root / str(run_dir)
+        png = run_path / "idw_field.png"
+        pdf = run_path / "idw_field.pdf"
+        if png.exists():
+            png_paths.append(png)
+        if pdf.exists():
+            pdf_paths.append(pdf)
+    return png_paths, pdf_paths
+
+
+def _write_idw_parameter_robustness(
+    rows: list[dict[str, object]], out_root: Path, global_reports: Path
+) -> list[dict[str, object]]:
+    robustness_rows = _build_parameter_robustness_rows(_add_score_columns(rows))
+    if robustness_rows:
+        _write_rows_csv(out_root / "parameter_robustness.csv", robustness_rows)
+        _write_rows_csv(global_reports / "parameter_robustness.csv", robustness_rows)
+    return robustness_rows
+
+
+def _empty_idw_report_state() -> IdwReportState:
+    return IdwReportState([], [], [], [], [], [])
+
+
+def _add_idw_best_run(
+    state: IdwReportState,
+    best_row: dict[str, object],
+    scenario_root: Path,
+    out_root: Path,
+) -> None:
+    state.best_rows.append(best_row)
+    _write_json(scenario_root / "best_run.json", _best_run_payload(best_row))
+    best_pngs, best_pdfs = _idw_paths_from_rows([best_row], out_root)
+    state.global_rep_pngs.extend(best_pngs)
+    state.global_rep_pdfs.extend(best_pdfs)
+
+
+def _write_idw_scenario_reports(
+    *,
+    rows: list[dict[str, object]],
+    png_paths: list[Path],
+    pdf_paths: list[Path],
+    scenario_reports: Path,
+    title_tag: str,
+    args: argparse.Namespace,
+    base_cfg,
+    sort_by_parent: bool = False,
+) -> None:
+    show_titles = base_cfg.plot.show_titles
+    path_key = (lambda p: p.parent.name) if sort_by_parent else (lambda p: p.name)
+    if not args.skip_pdf and png_paths:
+        _make_pdf_contact_sheet(
+            images=sorted(png_paths, key=path_key),
+            out_pdf=scenario_reports / args.pdf_name,
+            title=f"IDW Sweep - {title_tag}",
+            max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=True,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
+        )
+    if not args.skip_vector_merge and pdf_paths:
+        _merge_pdfs(
+            sorted(pdf_paths, key=path_key),
+            scenario_reports / args.vector_merge_name,
+        )
+    if not args.skip_vector_sheet and pdf_paths:
+        _make_pdf_contact_sheet_vector(
+            pdfs=sorted(pdf_paths, key=path_key),
+            out_pdf=scenario_reports / args.vector_sheet_name,
+            title=f"IDW Sweep - {title_tag}",
+            max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=True,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
+        )
+    if rows:
+        for metric_key, label, filename in [
+            ("rmse", "RMSE", "metric_heatmap_rmse.png"),
+            (
+                "valid_pixel_fraction",
+                "Valid Pixel Fraction",
+                "metric_heatmap_valid_pixel_fraction.png",
+            ),
+            ("balanced_score", "Balanced Score", "metric_heatmap_balanced_score.png"),
+        ]:
+            _plot_idw_metric_heatmap(
+                rows,
+                metric_key=metric_key,
+                title=f"{title_tag} - {label} by IDW Parameters",
+                out_path=scenario_reports / filename,
+                show_titles=show_titles,
+                plot_cfg=base_cfg.plot,
+            )
+
+
+def _write_idw_global_outputs(
+    *,
+    state: IdwReportState,
+    out_root: Path,
+    global_reports: Path,
+    args: argparse.Namespace,
+    base_cfg,
+    scenario_count: int,
+) -> None:
+    show_titles = base_cfg.plot.show_titles
+    sorted_best = sorted(
+        state.best_rows, key=lambda r: _rank_sort_key(r, args.ranking_metric)
+    )
+    _write_rows_csv(out_root / "leaderboard.csv", _compact_leaderboard_rows(sorted_best))
+    _write_rows_csv(out_root / args.summary_name, _compact_leaderboard_rows(sorted_best))
+    _write_rows_csv(
+        global_reports / "all_runs.csv",
+        sorted(state.all_rows, key=lambda r: _rank_sort_key(r, args.ranking_metric)),
+    )
+    _write_rows_csv(global_reports / "best_per_scenario.csv", sorted_best)
+    _write_idw_parameter_robustness(state.all_rows, out_root, global_reports)
+
+    png_for_global = _select_mode_items(
+        all_items=state.global_all_pngs,
+        rep_items=state.global_rep_pngs,
+        mode=args.global_png_sheet_mode,
+        scenario_count=scenario_count,
+    )
+    vec_for_global = _select_mode_items(
+        all_items=state.global_all_pdfs,
+        rep_items=state.global_rep_pdfs,
+        mode=args.global_vector_sheet_mode,
+        scenario_count=scenario_count,
+    )
+
+    if not args.skip_pdf and png_for_global:
+        global_png_name = (
+            "all_runs_contact_sheet.pdf"
+            if args.global_png_sheet_mode == "all"
+            else "best_per_scenario_contact_sheet.pdf"
+        )
+        keep_subplot_titles = global_png_name == "best_per_scenario_contact_sheet.pdf"
+        _make_pdf_contact_sheet(
+            images=sorted(png_for_global, key=lambda p: str(p)),
+            out_pdf=global_reports / global_png_name,
+            title="IDW Sweep - Global Representative Fields",
+            max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=keep_subplot_titles or show_titles,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
+        )
+    if not args.skip_vector_sheet and vec_for_global:
+        global_vec_name = (
+            "all_runs_vector_sheet.pdf"
+            if args.global_vector_sheet_mode == "all"
+            else args.global_vector_sheet_name
+        )
+        _make_pdf_contact_sheet_vector(
+            pdfs=sorted(vec_for_global, key=lambda p: str(p)),
+            out_pdf=global_reports / global_vec_name,
+            title="IDW Sweep - Global Representative Fields",
+            max_per_page=args.max_per_page,
+            show_titles=show_titles,
+            show_subplot_titles=show_titles,
+            show_figure_title=show_titles,
+            plot_cfg=base_cfg.plot,
+            sheet_rows=args.sheet_rows,
+            sheet_cols=args.sheet_cols,
+        )
+    if not args.skip_vector_merge and state.global_all_pdfs:
+        _merge_pdfs(
+            sorted(state.global_all_pdfs, key=lambda p: str(p)),
+            global_reports / args.global_vector_merge_name,
+        )
+
+
+def _rerender_idw_reports(args: argparse.Namespace, base_cfg, out_root: Path) -> int:
+    scenarios_root = out_root / "scenarios"
+    global_reports = out_root / "reports" / "global"
+    state = _empty_idw_report_state()
+
+    if not scenarios_root.exists():
+        log_error("IDW-SWEEP", f"cannot rerender; missing scenarios directory: {scenarios_root}")
+        return 2
+
+    for scenario_root in sorted(p for p in scenarios_root.iterdir() if p.is_dir()):
+        scenario_reports = scenario_root / "reports"
+        rows = _read_rows_csv(scenario_root / args.summary_name)
+        if not rows:
+            log_warn("IDW-SWEEP", f"skipping rerender; missing summary: {scenario_root}")
+            continue
+        rows = _rank_rows(rows, out_root, ranking_metric=args.ranking_metric)
+        _write_rows_csv(scenario_root / args.summary_name, rows)
+        state.all_rows.extend(rows)
+
+        png_paths, pdf_paths = _idw_paths_from_rows(rows, out_root)
+        state.global_all_pngs.extend(png_paths)
+        state.global_all_pdfs.extend(pdf_paths)
+        if rows:
+            _add_idw_best_run(state, rows[0], scenario_root, out_root)
+
+        _write_idw_scenario_reports(
+            rows=rows,
+            png_paths=png_paths,
+            pdf_paths=pdf_paths,
+            scenario_reports=scenario_reports,
+            title_tag=scenario_root.name,
+            args=args,
+            base_cfg=base_cfg,
+            sort_by_parent=True,
+        )
+    _write_idw_global_outputs(
+        state=state,
+        out_root=out_root,
+        global_reports=global_reports,
+        args=args,
+        base_cfg=base_cfg,
+        scenario_count=len(state.best_rows),
+    )
+    log_info("IDW-SWEEP", f"rerendered reports from existing runs: {out_root}")
+    return 0
 
 
 def _build_manifest(
@@ -757,21 +1256,27 @@ def build_idw_parser() -> argparse.ArgumentParser:
         "--debug", action="store_true", help="Enable debug mode in run_scenario"
     )
     ap.add_argument(
-        "--powers", default="1,2,3", help="Comma-separated idw_power values"
+        "--preset",
+        choices=sorted(IDW_SWEEP_PRESETS),
+        default="",
+        help="Named IDW sweep grid. Explicit parameter lists override preset values.",
     )
-    ap.add_argument("--nears", default="4,8,12", help="Comma-separated idw_near values")
+    ap.add_argument(
+        "--powers", default=None, help="Comma-separated idw_power values"
+    )
+    ap.add_argument("--nears", default=None, help="Comma-separated idw_near values")
     ap.add_argument(
         "--dists",
-        default="10000,30000,60000",
+        default=None,
         help="Comma-separated idw_dist_m values; use 0 for unlimited",
     )
     ap.add_argument(
-        "--n-sites-list", default="50,75,100", help="Comma-separated n_sites values"
+        "--n-sites-list", default=None, help="Comma-separated n_sites values"
     )
-    ap.add_argument("--seeds", default="0,1,2", help="Comma-separated seed values")
+    ap.add_argument("--seeds", default=None, help="Comma-separated seed values")
     ap.add_argument(
         "--wet-targets",
-        default="0.1,0.33,0.5",
+        default=None,
         help="Comma-separated wet_target values",
     )
     ap.add_argument("--idw-pdf-dirname", default="_idw_pdf", help="Deprecated; ignored")
@@ -792,9 +1297,20 @@ def build_idw_parser() -> argparse.ArgumentParser:
     ap.add_argument("--summary-name", default="summary.csv")
     ap.add_argument("--keep-temp-configs", action="store_true")
     ap.add_argument("--skip-pdf", action="store_true", help="Skip PNG contact sheets")
-    ap.add_argument("--max-per-page", type=int, default=25)
+    ap.add_argument("--max-per-page", type=int, default=None)
     ap.add_argument("--sheet-rows", type=int, default=None)
     ap.add_argument("--sheet-cols", type=int, default=None)
+    ap.add_argument(
+        "--ranking-metric",
+        choices=["rmse", "balanced_score", "detection_score", "valid_pixel_fraction"],
+        default="rmse",
+        help="Metric used to select best runs. Lower is better except valid_pixel_fraction.",
+    )
+    ap.add_argument(
+        "--rerender-only",
+        action="store_true",
+        help="Rebuild reports from existing run outputs and summary CSV files.",
+    )
     ap.add_argument(
         "--global-vector-sheet-mode",
         choices=["auto", "rep", "all"],
@@ -827,25 +1343,23 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             "IDW-SWEEP",
             "--idw-png-dirname/--idw-pdf-dirname are deprecated and ignored",
         )
-    if (args.sheet_rows is None) != (args.sheet_cols is None):
-        log_error("IDW-SWEEP", "--sheet-rows and --sheet-cols must be used together")
-        return 2
-    if args.sheet_rows is not None and (args.sheet_rows <= 0 or args.sheet_cols <= 0):
-        log_error("IDW-SWEEP", "--sheet-rows and --sheet-cols must be positive")
+    try:
+        _normalize_idw_report_args(args)
+    except ValueError as exc:
+        log_error("IDW-SWEEP", str(exc))
         return 2
 
     base_cfg = load_scenario_config(base_config)
-    show_titles = base_cfg.plot.show_titles
     out_root = Path(args.out_root).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     log_info("IDW-SWEEP", f"output root: {out_root}")
+    if args.preset:
+        log_info("IDW-SWEEP", f"using preset: {args.preset}")
 
-    powers = _parse_float_list(args.powers)
-    nears = _parse_int_list(args.nears)
-    dists = _parse_float_list(args.dists)
-    n_sites_list = _parse_int_list(args.n_sites_list)
-    seeds = _parse_int_list(args.seeds)
-    wet_targets = _parse_float_list(args.wet_targets)
+    if args.rerender_only:
+        return _rerender_idw_reports(args, base_cfg, out_root)
+
+    powers, nears, dists, n_sites_list, seeds, wet_targets = _parse_idw_grid_args(args)
 
     idw_combos = list(itertools.product(powers, nears, dists))
     outer_combos = list(itertools.product(n_sites_list, wet_targets, seeds))
@@ -855,15 +1369,9 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
         log_info("IDW-SWEEP", f"total runs: {len(outer_combos) * len(idw_combos)}")
 
     scenarios_root = out_root / "scenarios"
-    reports_root = out_root / "reports"
-    global_reports = reports_root / "global"
+    global_reports = out_root / "reports" / "global"
 
-    global_all_pngs: list[Path] = []
-    global_all_pdfs: list[Path] = []
-    global_rep_pngs: list[Path] = []
-    global_rep_pdfs: list[Path] = []
-    all_rows: list[dict[str, object]] = []
-    best_rows: list[dict[str, object]] = []
+    state = _empty_idw_report_state()
     scenario_tags: list[str] = []
 
     for n_sites, wet_target, seed in outer_combos:
@@ -917,152 +1425,50 @@ def run_idw_sweep(args: argparse.Namespace) -> int:
             pdf_path = run_out / "idw_field.pdf"
             if png_path.exists():
                 png_paths.append(png_path)
-                global_all_pngs.append(png_path)
+                state.global_all_pngs.append(png_path)
             else:
                 log_warn("IDW-SWEEP", f"missing {png_path}")
             if pdf_path.exists():
                 pdf_paths.append(pdf_path)
-                global_all_pdfs.append(pdf_path)
+                state.global_all_pdfs.append(pdf_path)
             else:
                 log_warn("IDW-SWEEP", f"missing {pdf_path}")
 
-        ranked_rows = _rank_rows(run_rows, out_root)
-        all_rows.extend(ranked_rows)
+        ranked_rows = _rank_rows(run_rows, out_root, ranking_metric=args.ranking_metric)
+        state.all_rows.extend(ranked_rows)
         _write_rows_csv(scenario_root / args.summary_name, ranked_rows)
 
         if ranked_rows:
-            best_row = ranked_rows[0]
-            best_rows.append(best_row)
-            _write_json(scenario_root / "best_run.json", _best_run_payload(best_row))
+            _add_idw_best_run(state, ranked_rows[0], scenario_root, out_root)
 
-            best_run_dir = out_root / str(best_row["run_dir"])
-            best_png = best_run_dir / "idw_field.png"
-            best_pdf = best_run_dir / "idw_field.pdf"
-            if best_png.exists():
-                global_rep_pngs.append(best_png)
-            if best_pdf.exists():
-                global_rep_pdfs.append(best_pdf)
+        _write_idw_scenario_reports(
+            rows=ranked_rows,
+            png_paths=png_paths,
+            pdf_paths=pdf_paths,
+            scenario_reports=scenario_reports,
+            title_tag=scen_tag,
+            args=args,
+            base_cfg=base_cfg,
+        )
 
-        if not args.skip_pdf and png_paths:
-            _make_pdf_contact_sheet(
-                images=sorted(png_paths, key=lambda p: p.name),
-                out_pdf=scenario_reports / args.pdf_name,
-                title=f"IDW Sweep - {scen_tag}",
-                max_per_page=args.max_per_page,
-                show_titles=show_titles,
-                show_subplot_titles=True,
-                show_figure_title=show_titles,
-                plot_cfg=base_cfg.plot,
-                sheet_rows=args.sheet_rows,
-                sheet_cols=args.sheet_cols,
-            )
-        if not args.skip_vector_merge and pdf_paths:
-            _merge_pdfs(
-                sorted(pdf_paths, key=lambda p: p.name),
-                scenario_reports / args.vector_merge_name,
-            )
-        if not args.skip_vector_sheet and pdf_paths:
-            _make_pdf_contact_sheet_vector(
-                pdfs=sorted(pdf_paths, key=lambda p: p.name),
-                out_pdf=scenario_reports / args.vector_sheet_name,
-                title=f"IDW Sweep - {scen_tag}",
-                max_per_page=args.max_per_page,
-                show_titles=show_titles,
-                show_subplot_titles=True,
-                show_figure_title=show_titles,
-                plot_cfg=base_cfg.plot,
-                sheet_rows=args.sheet_rows,
-                sheet_cols=args.sheet_cols,
-            )
-        if ranked_rows:
-            _plot_idw_metric_heatmap(
-                ranked_rows,
-                metric_key="rmse",
-                title=f"{scen_tag} - RMSE by IDW Parameters",
-                out_path=scenario_reports / "metric_heatmap_rmse.png",
-                show_titles=show_titles,
-                plot_cfg=base_cfg.plot,
-            )
-            _plot_idw_metric_heatmap(
-                ranked_rows,
-                metric_key="valid_pixel_fraction",
-                title=f"{scen_tag} - Valid Pixel Fraction by IDW Parameters",
-                out_path=scenario_reports / "metric_heatmap_valid_pixel_fraction.png",
-                show_titles=show_titles,
-                plot_cfg=base_cfg.plot,
-            )
-
-    leaderboard_rows = _compact_leaderboard_rows(sorted(best_rows, key=_rmse_key))
-    _write_rows_csv(out_root / "leaderboard.csv", leaderboard_rows)
-    _write_rows_csv(out_root / args.summary_name, leaderboard_rows)
-    _write_rows_csv(global_reports / "all_runs.csv", sorted(all_rows, key=_rmse_key))
-    _write_rows_csv(
-        global_reports / "best_per_scenario.csv", sorted(best_rows, key=_rmse_key)
-    )
-
-    png_for_global = _select_mode_items(
-        all_items=global_all_pngs,
-        rep_items=global_rep_pngs,
-        mode=args.global_png_sheet_mode,
+    _write_idw_global_outputs(
+        state=state,
+        out_root=out_root,
+        global_reports=global_reports,
+        args=args,
+        base_cfg=base_cfg,
         scenario_count=len(outer_combos),
     )
-    vec_for_global = _select_mode_items(
-        all_items=global_all_pdfs,
-        rep_items=global_rep_pdfs,
-        mode=args.global_vector_sheet_mode,
-        scenario_count=len(outer_combos),
-    )
-
-    if not args.skip_pdf and png_for_global:
-        global_png_name = (
-            "all_runs_contact_sheet.pdf"
-            if args.global_png_sheet_mode == "all"
-            else "best_per_scenario_contact_sheet.pdf"
-        )
-        keep_subplot_titles = global_png_name == "best_per_scenario_contact_sheet.pdf"
-        _make_pdf_contact_sheet(
-            images=sorted(png_for_global, key=lambda p: p.name),
-            out_pdf=global_reports / global_png_name,
-            title="IDW Sweep - Global Representative Fields",
-            max_per_page=args.max_per_page,
-            show_titles=show_titles,
-            show_subplot_titles=keep_subplot_titles or show_titles,
-            show_figure_title=show_titles,
-            plot_cfg=base_cfg.plot,
-            sheet_rows=args.sheet_rows,
-            sheet_cols=args.sheet_cols,
-        )
-    if not args.skip_vector_sheet and vec_for_global:
-        global_vec_name = (
-            "all_runs_vector_sheet.pdf"
-            if args.global_vector_sheet_mode == "all"
-            else args.global_vector_sheet_name
-        )
-        _make_pdf_contact_sheet_vector(
-            pdfs=sorted(vec_for_global, key=lambda p: p.name),
-            out_pdf=global_reports / global_vec_name,
-            title="IDW Sweep - Global Representative Fields",
-            max_per_page=args.max_per_page,
-            show_titles=show_titles,
-            show_subplot_titles=show_titles,
-            show_figure_title=show_titles,
-            plot_cfg=base_cfg.plot,
-            sheet_rows=args.sheet_rows,
-            sheet_cols=args.sheet_cols,
-        )
-    if not args.skip_vector_merge and global_all_pdfs:
-        _merge_pdfs(
-            sorted(global_all_pdfs, key=lambda p: p.name),
-            global_reports / args.global_vector_merge_name,
-        )
 
     manifest = _build_manifest(
         "idw",
         out_root,
         scenario_tags,
-        total_runs=len(all_rows),
+        total_runs=len(state.all_rows),
         extra={
             "reports": {"global_dir": "reports/global"},
+            "ranking_metric": args.ranking_metric,
+            "preset": args.preset or None,
             "parameter_grid": {
                 "powers": powers,
                 "nears": nears,

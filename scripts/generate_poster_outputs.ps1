@@ -32,16 +32,8 @@ Write-Host "[3/4] Generating IDW sweep outputs for 2x6 poster grid..."
 & $pythonBin run_idw_sweep.py `
   --base-config configs/config.ini `
   --out-root poster_outputs/03_idw_sweep_2x6 `
-  --powers 1,2.5,4 `
-  --nears 6,12 `
-  --dists 10000,30000 `
-  --n-sites-list 50 `
-  --seeds 0 `
-  --wet-targets 0.2 `
-  --no-log-to-file `
-  --max-per-page 12 `
-  --sheet-rows 2 `
-  --sheet-cols 6
+  --preset poster `
+  --no-log-to-file
 
 Write-Host "[4/4] Generating fault-case scenario outputs..."
 & $pythonBin run_scenario.py `

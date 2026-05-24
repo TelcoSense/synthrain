@@ -32,6 +32,7 @@ configs/*.ini
 # Output directories
 outputs/
 outputs_sweep/
+outputs_idw_sweep/
 
 # OS
 .DS_Store
@@ -42,5 +43,6 @@ synthrain.zip
 poster_outputs/*
 outputs/*
 outputs_sweep/*
+outputs_idw_sweep/*
 outputs_wet_sweep/*
 logs/*
