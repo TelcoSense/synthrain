@@ -33,6 +33,10 @@ configs/*.ini
 outputs/
 outputs_sweep/
 outputs_idw_sweep/
+outputs_wet_sweep/
+outputs_*/
+poster_outputs/
+logs/
 
 # OS
 .DS_Store
@@ -45,4 +49,5 @@ outputs/*
 outputs_sweep/*
 outputs_idw_sweep/*
 outputs_wet_sweep/*
+outputs_*/*
 logs/*
