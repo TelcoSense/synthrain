@@ -1,4 +1,4 @@
-# synthrain
+# SynthRain
 
 Lightweight synthetic testbed for TelcoRain-like rainfall interpolation.
 
